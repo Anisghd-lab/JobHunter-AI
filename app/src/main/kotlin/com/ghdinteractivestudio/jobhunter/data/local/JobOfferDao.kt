@@ -9,11 +9,14 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface JobOfferDao {
-    @Query("SELECT * FROM job_offers ORDER BY detectedAt DESC")
+    @Query("SELECT * FROM job_offers ORDER BY matchScore DESC, detectedAt DESC")
     fun getAllOffers(): Flow<List<JobOfferEntity>>
 
     @Query("SELECT * FROM job_offers WHERE status = :status ORDER BY detectedAt DESC")
     fun getOffersByStatus(status: String): Flow<List<JobOfferEntity>>
+
+    @Query("SELECT * FROM job_offers WHERE status != 'DETECTED' ORDER BY appliedAt DESC, detectedAt DESC")
+    fun getPipelineOffers(): Flow<List<JobOfferEntity>>
 
     @Query("SELECT * FROM job_offers WHERE id = :id")
     suspend fun getOfferById(id: String): JobOfferEntity?
@@ -32,6 +35,9 @@ interface JobOfferDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(offers: List<JobOfferEntity>)
+
+    @Query("DELETE FROM job_offers WHERE status = 'DETECTED'")
+    suspend fun clearDetectedOffers()
 
     @Update
     suspend fun update(offer: JobOfferEntity)

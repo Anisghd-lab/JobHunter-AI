@@ -51,39 +51,74 @@ class EmailDispatcher(private val config: EmailConfig) {
         }
     }
 
+    private fun readSmtpResponse(reader: BufferedReader): String {
+        val sb = StringBuilder()
+        while (true) {
+            val line = reader.readLine() ?: break
+            sb.append(line).append("\n")
+            // SMTP multi-line replies have '-' at index 3; final line has ' ' or length < 4
+            if (line.length < 4 || line[3] != '-') {
+                break
+            }
+        }
+        return sb.toString().trim()
+    }
+
     private fun sendViaSmtpSocket(
         recipient: String,
         subject: String,
         bodyText: String,
         attachments: List<File>
     ) {
-        val socket: Socket = if (config.smtpPort == 465) {
+        var socket: Socket = if (config.smtpPort == 465) {
             SSLSocketFactory.getDefault().createSocket(config.smtpHost, config.smtpPort)
         } else {
             Socket(config.smtpHost, config.smtpPort)
         }
+        socket.soTimeout = 20000
 
-        socket.soTimeout = 15000
-        val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
-        val writer = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
+        var reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
+        var writer = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
 
         fun sendCmd(cmd: String, expectedCode: String? = null): String {
             writer.write(cmd + "\r\n")
             writer.flush()
-            val response = reader.readLine() ?: ""
+            val response = readSmtpResponse(reader)
             if (expectedCode != null && !response.startsWith(expectedCode)) {
-                error("SMTP Error sending '$cmd': $response")
+                error("SMTP Error sending '${cmd.take(20)}': $response")
             }
             return response
         }
 
-        // Read server banner
-        reader.readLine()
+        // Read server greeting banner
+        val banner = readSmtpResponse(reader)
+        if (!banner.startsWith("220")) {
+            error("SMTP Connection error: $banner")
+        }
 
         sendCmd("EHLO localhost", "250")
+
+        // Upgrade with STARTTLS when using port 587
+        if (config.smtpPort == 587) {
+            sendCmd("STARTTLS", "220")
+            val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
+            val tlsSocket = sslFactory.createSocket(
+                socket,
+                config.smtpHost,
+                config.smtpPort,
+                true
+            ) as SSLSocket
+            tlsSocket.startHandshake()
+            socket = tlsSocket
+            reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
+            writer = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
+            sendCmd("EHLO localhost", "250")
+        }
+
+        val user = config.smtpUser.ifBlank { config.senderEmail }
         sendCmd("AUTH LOGIN", "334")
-        sendCmd(Base64.encodeToString(config.smtpUser.toByteArray(), Base64.NO_WRAP), "334")
-        sendCmd(Base64.encodeToString(config.smtpPassword.toByteArray(), Base64.NO_WRAP), "235")
+        sendCmd(Base64.encodeToString(user.toByteArray(Charsets.UTF_8), Base64.NO_WRAP), "334")
+        sendCmd(Base64.encodeToString(config.smtpPassword.toByteArray(Charsets.UTF_8), Base64.NO_WRAP), "235")
 
         sendCmd("MAIL FROM:<${config.senderEmail}>", "250")
         sendCmd("RCPT TO:<$recipient>", "250")
@@ -91,9 +126,9 @@ class EmailDispatcher(private val config: EmailConfig) {
 
         val boundary = "==_JobHunterBoundary_${System.currentTimeMillis()}_=="
 
-        writer.write("From: ${config.senderName} <${config.senderEmail}>\r\n")
+        writer.write("From: ${config.senderName.ifBlank { config.senderEmail }} <${config.senderEmail}>\r\n")
         writer.write("To: <$recipient>\r\n")
-        writer.write("Subject: =?UTF-8?B?${Base64.encodeToString(subject.toByteArray(), Base64.NO_WRAP)}?=\r\n")
+        writer.write("Subject: =?UTF-8?B?${Base64.encodeToString(subject.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)}?=\r\n")
         writer.write("MIME-Version: 1.0\r\n")
         writer.write("Content-Type: multipart/mixed; boundary=\"$boundary\"\r\n\r\n")
 
@@ -101,7 +136,7 @@ class EmailDispatcher(private val config: EmailConfig) {
         writer.write("--$boundary\r\n")
         writer.write("Content-Type: text/plain; charset=UTF-8\r\n")
         writer.write("Content-Transfer-Encoding: 8bit\r\n\r\n")
-        writer.write(bodyText + "\r\n\r\n")
+        writer.write(bodyText.replace("\n.", "\n..") + "\r\n\r\n")
 
         // Attachments (.pdf, .docx)
         for (file in attachments) {
@@ -111,7 +146,7 @@ class EmailDispatcher(private val config: EmailConfig) {
                 } else {
                     "application/pdf"
                 }
-                val encodedBytes = Base64.encodeToString(file.readBytes(), Base64.DEFAULT)
+                val encodedBytes = Base64.encodeToString(file.readBytes(), Base64.CRLF)
 
                 writer.write("--$boundary\r\n")
                 writer.write("Content-Type: $mimeType; name=\"${file.name}\"\r\n")
@@ -123,9 +158,8 @@ class EmailDispatcher(private val config: EmailConfig) {
 
         writer.write("--$boundary--\r\n")
         sendCmd(".", "250")
-        sendCmd("QUIT")
-
-        socket.close()
+        runCatching { sendCmd("QUIT") }
+        runCatching { socket.close() }
     }
 
     private fun sendViaGmailOAuth2(
@@ -137,9 +171,9 @@ class EmailDispatcher(private val config: EmailConfig) {
         val boundary = "==_GmailBoundary_${System.currentTimeMillis()}_=="
         val rawMessage = StringBuilder()
 
-        rawMessage.append("From: ${config.senderName} <${config.senderEmail}>\r\n")
+        rawMessage.append("From: ${config.senderName.ifBlank { config.senderEmail }} <${config.senderEmail}>\r\n")
         rawMessage.append("To: <$recipient>\r\n")
-        rawMessage.append("Subject: =?UTF-8?B?${Base64.encodeToString(subject.toByteArray(), Base64.NO_WRAP)}?=\r\n")
+        rawMessage.append("Subject: =?UTF-8?B?${Base64.encodeToString(subject.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)}?=\r\n")
         rawMessage.append("MIME-Version: 1.0\r\n")
         rawMessage.append("Content-Type: multipart/mixed; boundary=\"$boundary\"\r\n\r\n")
 

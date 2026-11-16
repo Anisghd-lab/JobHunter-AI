@@ -49,6 +49,17 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- FileProvider for sharing generated PDF & Word .docx CVs and Cover Letters -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Boot Receiver for Auto-restart -->
         <receiver
             android:name=".service.BootReceiver"

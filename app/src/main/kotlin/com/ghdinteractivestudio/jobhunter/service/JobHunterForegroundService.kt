@@ -10,12 +10,15 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.ghdinteractivestudio.jobhunter.MainActivity
-import com.ghdinteractivestudio.jobhunter.R
 import com.ghdinteractivestudio.jobhunter.data.local.AppDatabase
 import com.ghdinteractivestudio.jobhunter.data.local.JobOfferEntity
+import com.ghdinteractivestudio.jobhunter.data.local.SettingsRepository
 import com.ghdinteractivestudio.jobhunter.data.remote.JobScanner
+import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomationManager
+import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,6 +34,7 @@ class JobHunterForegroundService : Service() {
     private val scanner = JobScanner()
 
     companion object {
+        private const val TAG = "JobHunterService"
         const val CHANNEL_ID = "jobhunter_24_7_channel"
         const val NOTIFICATION_ID = 1001
 
@@ -54,7 +58,7 @@ class JobHunterForegroundService : Service() {
         runCatching {
             createNotificationChannel()
             acquireWakeLock()
-            val notif = buildNotification("Agent Actif 24/7", "Veille et scan des opportunités en cours...")
+            val notif = buildNotification("Agent Actif 24/7", "Veille web Algérie & International en cours...")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -74,7 +78,7 @@ class JobHunterForegroundService : Service() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "JobHunterAI::247Service").apply {
             setReferenceCounted(false)
-            acquire(24 * 60 * 60 * 1000L) // 24 hours renewal
+            acquire(24 * 60 * 60 * 1000L)
         }
     }
 
@@ -83,18 +87,58 @@ class JobHunterForegroundService : Service() {
             val db = AppDatabase.getInstance(applicationContext)
             val dao = db.jobOfferDao()
             val profileDao = db.userProfileDao()
+            val settingsRepo = SettingsRepository.getInstance(applicationContext)
 
             while (isActive) {
                 runCatching {
                     val profile = profileDao.getProfile()?.toDomain()
-                    val keywords = profile?.skills?.take(5) ?: listOf("Kotlin", "Android", "Développeur")
+                    val settings = settingsRepo.settings.value
 
-                    val newOffers = scanner.scanOffers(keywords)
+                    val newOffers = scanner.scanOffers(profile)
                     if (newOffers.isNotEmpty()) {
+                        dao.clearDetectedOffers()
                         dao.insertAll(newOffers.map { JobOfferEntity.fromDomain(it) })
                     }
 
-                    updateNotification("Veille 24/7 en direct", "${newOffers.size} opportunités trouvées · Prêt pour analyse")
+                    // Autonomous AI comparison + Cover Letter & Application Automation when CV is loaded
+                    var autoProcessedCount = 0
+                    if (profile != null && profile.rawCvContent.isNotBlank() && settings.hasAnyAiKey()) {
+                        val candidates = newOffers.take(3)
+                        for (candidate in candidates) {
+                            val existing = dao.getOfferById(candidate.id)
+                            if (existing != null && existing.status != JobStatus.DETECTED.name) continue
+
+                            val evalRes = ApplicationAutomationManager.evaluateOfferWithAi(
+                                context = applicationContext,
+                                offer = candidate,
+                                profile = profile,
+                                settings = settings,
+                                scanner = scanner
+                            )
+                            val evaluated = evalRes.getOrNull() ?: continue
+
+                            if (settings.autoApplyEnabled && evaluated.matchScore >= settings.autoApplyMinScore) {
+                                ApplicationAutomationManager.prepareAndApply(
+                                    context = applicationContext,
+                                    offer = evaluated,
+                                    profile = profile,
+                                    settings = settings,
+                                    scanner = scanner,
+                                    sendSilentEmailIfConfigured = true
+                                )
+                                autoProcessedCount++
+                            }
+                        }
+                    }
+
+                    val msg = if (autoProcessedCount > 0) {
+                        "${newOffers.size} offres réelles · $autoProcessedCount dossier(s) automatisé(s)"
+                    } else {
+                        "${newOffers.size} offres réelles (DZ & Monde) · Score calculé"
+                    }
+                    updateNotification("Veille 24/7 Active", msg)
+                }.onFailure { err ->
+                    Log.e(TAG, "Hunting loop error: ${err.message}", err)
                 }
 
                 // Scan interval: 30 minutes
@@ -110,7 +154,7 @@ class JobHunterForegroundService : Service() {
                 "JobHunter 24/7 Agent",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Maintient l'agent autonome actif en permanence pour trouver des opportunités d'emploi"
+                description = "Maintient l'agent autonome actif pour trouver et analyser des offres d'emploi réelles"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -140,9 +184,7 @@ class JobHunterForegroundService : Service() {
         manager.notify(NOTIFICATION_ID, buildNotification(title, text))
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY
-    }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
         serviceJob.cancel()

@@ -38,5 +38,15 @@ data class JobOffer(
     val recruiterEmail: String = "",
     val generatedLetter: String = "",
     val tailoredCvPath: String = "",
-    val letterPath: String = ""
+    val letterPath: String = "",
+    val tags: List<String> = emptyList(),
+    val regionScope: String = "INTERNATIONAL", // "ALGERIA" or "INTERNATIONAL"
+    val workMode: String = "REMOTE", // "REMOTE", "ONSITE", "HYBRID"
+    val applicationMethod: String = "WEBSITE", // "EMAIL" or "WEBSITE"
+    val salary: String = "",
+    val publishedDate: String = "",
+    val aiVerdict: String = "", // "CONVIENT", "MOYEN", "NON_ADAPTE"
+    val aiReasoning: String = "",
+    val appliedAt: Long = 0L,
+    val appliedChannel: String = ""
 )

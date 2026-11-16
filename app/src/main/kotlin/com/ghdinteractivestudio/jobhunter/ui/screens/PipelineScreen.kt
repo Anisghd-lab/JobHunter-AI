@@ -1,10 +1,15 @@
 package com.ghdinteractivestudio.jobhunter.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,10 +23,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Event
-import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -29,11 +40,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomationManager
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
 import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
-import com.ghdinteractivestudio.jobhunter.ui.components.GlassStyle
-import com.ghdinteractivestudio.jobhunter.ui.components.glass
 import com.ghdinteractivestudio.jobhunter.ui.components.glassCard
 import com.ghdinteractivestudio.jobhunter.ui.theme.Capsule
 import com.ghdinteractivestudio.jobhunter.ui.theme.LocalDark
@@ -44,21 +56,27 @@ import com.ghdinteractivestudio.jobhunter.ui.theme.bold
 import com.ghdinteractivestudio.jobhunter.ui.theme.monospaced
 import com.ghdinteractivestudio.jobhunter.ui.theme.semibold
 import kotlinx.coroutines.flow.StateFlow
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 @Composable
 fun PipelineScreen(
-    appliedOffersFlow: StateFlow<List<JobOffer>>,
+    allOffersFlow: StateFlow<List<JobOffer>>,
+    onUpdateStatus: (JobOffer, JobStatus) -> Unit,
+    onPrepareOrDispatchClick: (JobOffer) -> Unit,
+    onRemoveFromPipeline: (JobOffer) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val applications by appliedOffersFlow.collectAsState()
-    val dark = LocalDark.current
+    val allOffers by allOffersFlow.collectAsState()
 
-    val totalApplied = applications.count { it.status == JobStatus.APPLIED }
-    val totalInterview = applications.count { it.status == JobStatus.INTERVIEW }
-    val totalReady = applications.count { it.status == JobStatus.READY_TO_SEND }
+    // Strictly track REAL analyzed, ready, applied, interview or rejected candidatures (NEVER raw radar scan noise)
+    val trackedApps = allOffers.filter { it.status != JobStatus.DETECTED }
+
+    val totalApplied = trackedApps.count { it.status == JobStatus.APPLIED }
+    val totalInterview = trackedApps.count { it.status == JobStatus.INTERVIEW }
+    val totalPending = trackedApps.count { it.status == JobStatus.READY_TO_SEND || it.status == JobStatus.ANALYZED }
 
     Column(
         modifier = modifier
@@ -86,8 +104,8 @@ fun PipelineScreen(
                 modifier = Modifier.weight(1f)
             )
             MetricCard(
-                title = "À Valider",
-                count = totalReady,
+                title = "À Finaliser",
+                count = totalPending,
                 color = Palette.attention,
                 modifier = Modifier.weight(1f)
             )
@@ -96,14 +114,14 @@ fun PipelineScreen(
         Spacer(Modifier.height(18.dp))
 
         Text(
-            text = "TABLEAU DE SUIVI DES CANDIDATURES",
+            text = "SUIVI RÉEL DES CANDIDATURES (${trackedApps.size})",
             style = Type.mono.bold,
             color = Palette.secondary
         )
 
         Spacer(Modifier.height(10.dp))
 
-        if (applications.isEmpty()) {
+        if (trackedApps.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -120,14 +138,15 @@ fun PipelineScreen(
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Aucune candidature envoyée pour l'instant.",
-                        style = Type.bodySmall,
-                        color = Palette.secondary
+                        text = "Aucune candidature active pour l'instant.",
+                        style = Type.bodySmall.bold,
+                        color = Palette.text
                     )
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "L'agent autonome 24/7 postule dès qu'une opportunité correspond.",
+                        text = "Comparez une offre dans le Radar ou lancez « Postuler » pour voir vos dossiers suivis ici avec liens, CV, lettres et statuts réels.",
                         style = Type.label,
-                        color = Palette.tertiary
+                        color = Palette.secondary
                     )
                 }
             }
@@ -136,11 +155,16 @@ fun PipelineScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(applications, key = { it.id }) { app ->
-                    ApplicationTrackingCard(app = app)
+                items(trackedApps, key = { it.id }) { app ->
+                    ApplicationTrackingCard(
+                        app = app,
+                        onUpdateStatus = { newStatus -> onUpdateStatus(app, newStatus) },
+                        onDispatchClick = { onPrepareOrDispatchClick(app) },
+                        onRemoveClick = { onRemoveFromPipeline(app) }
+                    )
                 }
                 item {
-                    Spacer(Modifier.height(90.dp))
+                    Spacer(Modifier.height(95.dp))
                 }
             }
         }
@@ -175,8 +199,15 @@ fun MetricCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ApplicationTrackingCard(app: JobOffer) {
+fun ApplicationTrackingCard(
+    app: JobOffer,
+    onUpdateStatus: (JobStatus) -> Unit,
+    onDispatchClick: () -> Unit,
+    onRemoveClick: () -> Unit
+) {
+    val context = LocalContext.current
     val dark = LocalDark.current
     val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
@@ -184,7 +215,18 @@ fun ApplicationTrackingCard(app: JobOffer) {
         JobStatus.INTERVIEW -> Palette.emeraldAccent
         JobStatus.APPLIED -> Palette.electricBlue
         JobStatus.READY_TO_SEND -> Palette.attention
+        JobStatus.ANALYZED -> Color(0xFF38BDF8)
+        JobStatus.REJECTED -> Color(0xFFF87171)
         else -> Palette.secondary
+    }
+
+    val statusLabel = when (app.status) {
+        JobStatus.ANALYZED -> "ANALYSÉE (${app.matchScore}%)"
+        JobStatus.READY_TO_SEND -> "PRÊTE À ENVOYER"
+        JobStatus.APPLIED -> "POSTULÉE ✓"
+        JobStatus.INTERVIEW -> "ENTRETIEN 🎉"
+        JobStatus.REJECTED -> "REFUSÉE"
+        else -> app.status.name
     }
 
     Box(
@@ -199,37 +241,101 @@ fun ApplicationTrackingCard(app: JobOffer) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = app.company,
-                    style = Type.titleMedium.bold,
-                    color = Palette.text
-                )
-
-                // Status chip
-                Box(
-                    modifier = Modifier
-                        .background(statusColor.copy(alpha = 0.16f), Capsule())
-                        .border(0.5.dp, statusColor.copy(alpha = 0.4f), Capsule())
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = app.status.name,
-                        style = Type.label.bold.monospaced,
-                        color = statusColor
+                        text = app.company,
+                        style = Type.titleMedium.bold,
+                        color = Palette.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    Text(
+                        text = app.title,
+                        style = Type.bodySmall.semibold,
+                        color = Palette.emeraldAccent,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .background(statusColor.copy(alpha = 0.16f), Capsule())
+                            .border(0.5.dp, statusColor.copy(alpha = 0.4f), Capsule())
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = statusLabel,
+                            style = Type.label.bold.monospaced,
+                            color = statusColor
+                        )
+                    }
+
+                    IconButton(onClick = onRemoveClick, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Retirer du suivi",
+                            tint = Palette.tertiary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 
             Spacer(Modifier.height(4.dp))
             Text(
-                text = app.title,
-                style = Type.bodySmall,
+                text = "${app.location} • ${app.sourcePlatform}${if (app.appliedChannel.isNotBlank()) " • ${app.appliedChannel}" else ""}",
+                style = Type.label,
                 color = Palette.secondary
             )
 
+            if (app.tags.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    app.tags.take(4).forEach { tag ->
+                        Box(
+                            modifier = Modifier
+                                .background(if (dark) Color(0x22FFFFFF) else Color(0x12000000), Capsule())
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        ) {
+                            Text(text = "#$tag", style = Type.label, color = Palette.tertiary)
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
 
-            // Attachment & Dispatch Info Plate
+            // Clickable Web URL
+            if (app.url.startsWith("http")) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(app.url))) }
+                        }
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = Palette.electricBlue, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = app.url,
+                        style = Type.label.monospaced,
+                        color = Palette.electricBlue,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // Attachment & Timestamp Info Plate
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -239,31 +345,118 @@ fun ApplicationTrackingCard(app: JobOffer) {
                     )
                     .padding(8.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.AttachFile,
-                            contentDescription = null,
-                            tint = Palette.emeraldAccent,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AttachFile, contentDescription = null, tint = Palette.emeraldAccent, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Dossier (${app.requiredFormat.name})",
+                                style = Type.label.bold,
+                                color = Palette.text
+                            )
+                        }
+
+                        val ts = if (app.appliedAt > 0L) app.appliedAt else app.detectedAt
                         Text(
-                            text = "Pièces jointes : CV & Lettre (${app.requiredFormat.name})",
-                            style = Type.label,
-                            color = Palette.text
+                            text = dateFormat.format(Date(ts)),
+                            style = Type.label.monospaced,
+                            color = Palette.tertiary
                         )
                     }
 
-                    Text(
-                        text = dateFormat.format(Date(app.detectedAt)),
-                        style = Type.label.monospaced,
-                        color = Palette.tertiary
-                    )
+                    if (app.tailoredCvPath.isNotBlank() || app.letterPath.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (app.tailoredCvPath.isNotBlank() && File(app.tailoredCvPath).exists()) {
+                                Row(
+                                    modifier = Modifier
+                                        .background(Palette.electricBlue.copy(alpha = 0.16f), Capsule())
+                                        .clickable {
+                                            ApplicationAutomationManager.buildViewOrShareFileIntent(context, app.tailoredCvPath)?.let {
+                                                runCatching { context.startActivity(Intent.createChooser(it, "Ouvrir CV")) }
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Description, contentDescription = null, tint = Palette.electricBlue, modifier = Modifier.size(13.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("CV ${File(app.tailoredCvPath).extension.uppercase()}", style = Type.label.bold, color = Palette.electricBlue)
+                                }
+                            }
+                            if (app.letterPath.isNotBlank() && File(app.letterPath).exists()) {
+                                Row(
+                                    modifier = Modifier
+                                        .background(Palette.emeraldAccent.copy(alpha = 0.16f), Capsule())
+                                        .clickable {
+                                            ApplicationAutomationManager.buildViewOrShareFileIntent(context, app.letterPath)?.let {
+                                                runCatching { context.startActivity(Intent.createChooser(it, "Ouvrir Lettre")) }
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Description, contentDescription = null, tint = Palette.emeraldAccent, modifier = Modifier.size(13.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Lettre ${File(app.letterPath).extension.uppercase()}", style = Type.label.bold, color = Palette.emeraldAccent)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Pipeline Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (app.status == JobStatus.ANALYZED || app.status == JobStatus.READY_TO_SEND) {
+                    Button(
+                        onClick = onDispatchClick,
+                        shape = Capsule(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent, contentColor = Color.White),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (app.status == JobStatus.ANALYZED) "Générer & Postuler" else "Envoyer / Ouvrir",
+                            style = Type.label.bold
+                        )
+                    }
+                }
+
+                if (app.status != JobStatus.APPLIED && app.status != JobStatus.INTERVIEW) {
+                    Button(
+                        onClick = { onUpdateStatus(JobStatus.APPLIED) },
+                        shape = Capsule(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Palette.electricBlue.copy(alpha = 0.2f), contentColor = Palette.electricBlue)
+                    ) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Postulée", style = Type.label.bold)
+                    }
+                }
+
+                if (app.status == JobStatus.APPLIED) {
+                    Button(
+                        onClick = { onUpdateStatus(JobStatus.INTERVIEW) },
+                        shape = Capsule(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent.copy(alpha = 0.2f), contentColor = Palette.emeraldAccent),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Event, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Entretien décroché !", style = Type.label.bold)
+                    }
                 }
             }
         }

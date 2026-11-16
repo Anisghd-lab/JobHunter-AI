@@ -19,14 +19,24 @@ data class JobOfferEntity(
     val url: String,
     val detectedAt: Long,
     val matchScore: Int,
-    val matchingHighlights: String, // comma-separated or JSON
+    val matchingHighlights: String,
     val missingRequirements: String,
     val status: String,
     val requiredFormat: String,
     val recruiterEmail: String,
     val generatedLetter: String,
     val tailoredCvPath: String,
-    val letterPath: String
+    val letterPath: String,
+    val tags: String = "",
+    val regionScope: String = "INTERNATIONAL",
+    val workMode: String = "REMOTE",
+    val applicationMethod: String = "WEBSITE",
+    val salary: String = "",
+    val publishedDate: String = "",
+    val aiVerdict: String = "",
+    val aiReasoning: String = "",
+    val appliedAt: Long = 0L,
+    val appliedChannel: String = ""
 ) {
     fun toDomain(): JobOffer = JobOffer(
         id = id,
@@ -47,7 +57,17 @@ data class JobOfferEntity(
         recruiterEmail = recruiterEmail,
         generatedLetter = generatedLetter,
         tailoredCvPath = tailoredCvPath,
-        letterPath = letterPath
+        letterPath = letterPath,
+        tags = tags.split("||").filter { it.isNotBlank() },
+        regionScope = regionScope,
+        workMode = workMode,
+        applicationMethod = applicationMethod,
+        salary = salary,
+        publishedDate = publishedDate,
+        aiVerdict = aiVerdict,
+        aiReasoning = aiReasoning,
+        appliedAt = appliedAt,
+        appliedChannel = appliedChannel
     )
 
     companion object {
@@ -70,7 +90,17 @@ data class JobOfferEntity(
             recruiterEmail = offer.recruiterEmail,
             generatedLetter = offer.generatedLetter,
             tailoredCvPath = offer.tailoredCvPath,
-            letterPath = offer.letterPath
+            letterPath = offer.letterPath,
+            tags = offer.tags.joinToString("||"),
+            regionScope = offer.regionScope,
+            workMode = offer.workMode,
+            applicationMethod = offer.applicationMethod,
+            salary = offer.salary,
+            publishedDate = offer.publishedDate,
+            aiVerdict = offer.aiVerdict,
+            aiReasoning = offer.aiReasoning,
+            appliedAt = offer.appliedAt,
+            appliedChannel = offer.appliedChannel
         )
     }
 }

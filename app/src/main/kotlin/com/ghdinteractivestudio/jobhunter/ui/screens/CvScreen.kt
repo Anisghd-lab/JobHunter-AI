@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContactMail
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,7 +67,9 @@ import java.util.Locale
 @Composable
 fun CvScreen(
     profileFlow: StateFlow<UserProfile>,
+    isAnalyzingCv: Boolean,
     onImportCv: (Uri) -> Unit,
+    onReanalyzeWithAi: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val profile by profileFlow.collectAsState()
@@ -154,6 +158,7 @@ fun CvScreen(
                             )
                         )
                     },
+                    enabled = !isAnalyzingCv,
                     shape = Capsule(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Palette.emeraldAccent,
@@ -161,12 +166,35 @@ fun CvScreen(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(imageVector = Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = if (hasRealCv) "Remplacer le CV (Nouveau fichier)" else "Importer mon CV (PDF / Word .docx)",
-                        style = Type.body.semibold
-                    )
+                    if (isAnalyzingCv) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(text = "Analyse IA du CV en cours...", style = Type.body.semibold)
+                    } else {
+                        Icon(imageVector = Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = if (hasRealCv) "Remplacer le CV (Nouveau fichier)" else "Importer mon CV (PDF / Word .docx)",
+                            style = Type.body.semibold
+                        )
+                    }
+                }
+
+                if (hasRealCv && !isAnalyzingCv) {
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = onReanalyzeWithAi,
+                        shape = Capsule(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Palette.electricBlue.copy(alpha = 0.16f),
+                            contentColor = Palette.electricBlue
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(text = "Ré-analyser avec l'IA Gratuite", style = Type.label.bold)
+                    }
                 }
             }
         }
@@ -342,7 +370,11 @@ fun CvScreen(
                             Icon(imageVector = Icons.Default.ContactMail, contentDescription = null, tint = Palette.secondary, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = listOfNotNull(profile.email.ifBlank { null }, profile.phone.ifBlank { null }).joinToString(" • "),
+                                text = listOfNotNull(
+                                    profile.email.ifBlank { null },
+                                    profile.phone.ifBlank { null },
+                                    profile.address.ifBlank { null }
+                                ).joinToString(" • "),
                                 style = Type.label.monospaced,
                                 color = Palette.secondary
                             )
@@ -490,9 +522,10 @@ fun CvScreen(
                                         color = Palette.text
                                     )
                                 }
-                                if (edu.year.isNotBlank()) {
+                                val eduSub = listOfNotNull(edu.institution.ifBlank { null }, edu.year.ifBlank { null }).joinToString(" • ")
+                                if (eduSub.isNotBlank()) {
                                     Text(
-                                        text = edu.year,
+                                        text = eduSub,
                                         style = Type.label.monospaced,
                                         color = Palette.secondary
                                     )
@@ -500,6 +533,66 @@ fun CvScreen(
                             }
                         }
                         Spacer(Modifier.height(10.dp))
+                    }
+                }
+
+                // 4b. Soft Skills
+                if (profile.softSkills.isNotEmpty()) {
+                    Text(
+                        text = "ATOUTS & COMPÉTENCES TRANSVERSALES (${profile.softSkills.size})",
+                        style = Type.mono.bold,
+                        color = Palette.secondary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .glassCard()
+                            .padding(14.dp)
+                    ) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            for (soft in profile.softSkills) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Palette.electricBlue.copy(alpha = 0.14f), Capsule())
+                                        .border(0.5.dp, Palette.electricBlue.copy(alpha = 0.35f), Capsule())
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Text(text = soft, style = Type.label.semibold, color = Palette.electricBlue)
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+
+                // 4c. Certifications
+                if (profile.certifications.isNotEmpty()) {
+                    Text(
+                        text = "CERTIFICATIONS & DÉVELOPPEMENT (${profile.certifications.size})",
+                        style = Type.mono.bold,
+                        color = Palette.secondary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    for (cert in profile.certifications) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .glassCard()
+                                .padding(12.dp)
+                        ) {
+                            Column {
+                                Text(text = cert.name, style = Type.bodySmall.bold, color = Palette.text)
+                                val sub = listOfNotNull(cert.issuer.ifBlank { null }, cert.year.ifBlank { null }).joinToString(" • ")
+                                if (sub.isNotBlank()) {
+                                    Text(text = sub, style = Type.label.monospaced, color = Palette.secondary)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
 
@@ -518,7 +611,10 @@ fun CvScreen(
                             .glassCard()
                             .padding(14.dp)
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             for (lang in profile.languages) {
                                 Box(
                                     modifier = Modifier
