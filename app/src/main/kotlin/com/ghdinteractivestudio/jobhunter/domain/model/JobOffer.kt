@@ -1,0 +1,42 @@
+package com.ghdinteractivestudio.jobhunter.domain.model
+
+import kotlinx.serialization.Serializable
+
+enum class JobStatus {
+    DETECTED,
+    ANALYZED,
+    READY_TO_SEND,
+    APPLIED,
+    INTERVIEW,
+    REJECTED,
+    ARCHIVED
+}
+
+enum class DocumentFormatRequirement {
+    PDF,
+    DOCX,
+    ANY
+}
+
+@Serializable
+data class JobOffer(
+    val id: String,
+    val title: String,
+    val company: String,
+    val location: String,
+    val isRemote: Boolean = false,
+    val contractType: String = "CDI",
+    val description: String,
+    val sourcePlatform: String,
+    val url: String = "",
+    val detectedAt: Long = System.currentTimeMillis(),
+    val matchScore: Int = 0,
+    val matchingHighlights: List<String> = emptyList(),
+    val missingRequirements: List<String> = emptyList(),
+    val status: JobStatus = JobStatus.DETECTED,
+    val requiredFormat: DocumentFormatRequirement = DocumentFormatRequirement.ANY,
+    val recruiterEmail: String = "",
+    val generatedLetter: String = "",
+    val tailoredCvPath: String = "",
+    val letterPath: String = ""
+)

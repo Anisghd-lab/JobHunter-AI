@@ -1,0 +1,76 @@
+package com.ghdinteractivestudio.jobhunter.data.local
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import com.ghdinteractivestudio.jobhunter.domain.model.DocumentFormatRequirement
+import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
+import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
+
+@Entity(tableName = "job_offers")
+data class JobOfferEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val company: String,
+    val location: String,
+    val isRemote: Boolean,
+    val contractType: String,
+    val description: String,
+    val sourcePlatform: String,
+    val url: String,
+    val detectedAt: Long,
+    val matchScore: Int,
+    val matchingHighlights: String, // comma-separated or JSON
+    val missingRequirements: String,
+    val status: String,
+    val requiredFormat: String,
+    val recruiterEmail: String,
+    val generatedLetter: String,
+    val tailoredCvPath: String,
+    val letterPath: String
+) {
+    fun toDomain(): JobOffer = JobOffer(
+        id = id,
+        title = title,
+        company = company,
+        location = location,
+        isRemote = isRemote,
+        contractType = contractType,
+        description = description,
+        sourcePlatform = sourcePlatform,
+        url = url,
+        detectedAt = detectedAt,
+        matchScore = matchScore,
+        matchingHighlights = matchingHighlights.split("||").filter { it.isNotBlank() },
+        missingRequirements = missingRequirements.split("||").filter { it.isNotBlank() },
+        status = runCatching { JobStatus.valueOf(status) }.getOrDefault(JobStatus.DETECTED),
+        requiredFormat = runCatching { DocumentFormatRequirement.valueOf(requiredFormat) }.getOrDefault(DocumentFormatRequirement.ANY),
+        recruiterEmail = recruiterEmail,
+        generatedLetter = generatedLetter,
+        tailoredCvPath = tailoredCvPath,
+        letterPath = letterPath
+    )
+
+    companion object {
+        fun fromDomain(offer: JobOffer): JobOfferEntity = JobOfferEntity(
+            id = offer.id,
+            title = offer.title,
+            company = offer.company,
+            location = offer.location,
+            isRemote = offer.isRemote,
+            contractType = offer.contractType,
+            description = offer.description,
+            sourcePlatform = offer.sourcePlatform,
+            url = offer.url,
+            detectedAt = offer.detectedAt,
+            matchScore = offer.matchScore,
+            matchingHighlights = offer.matchingHighlights.joinToString("||"),
+            missingRequirements = offer.missingRequirements.joinToString("||"),
+            status = offer.status.name,
+            requiredFormat = offer.requiredFormat.name,
+            recruiterEmail = offer.recruiterEmail,
+            generatedLetter = offer.generatedLetter,
+            tailoredCvPath = offer.tailoredCvPath,
+            letterPath = offer.letterPath
+        )
+    }
+}
