@@ -51,10 +51,23 @@ class JobHunterForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
-        acquireWakeLock()
-        startForeground(NOTIFICATION_ID, buildNotification("Agent Actif 24/7", "Veille et scan des opportunités en cours..."))
-        startContinuousHuntingLoop()
+        runCatching {
+            createNotificationChannel()
+            acquireWakeLock()
+            val notif = buildNotification("Agent Actif 24/7", "Veille et scan des opportunités en cours...")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notif,
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    } else 0
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notif)
+            }
+            startContinuousHuntingLoop()
+        }
     }
 
     private fun acquireWakeLock() {
