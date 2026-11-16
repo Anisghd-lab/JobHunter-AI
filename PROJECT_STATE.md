@@ -31,6 +31,12 @@
   - Thème Light Mode Blanc Givré (`#F8F9FA`).
   - Barre de navigation flottante `GlassTabBar` identique (capsule dépolie avec pilule animée `animateDpAsState`).
 - [x] **Publication & Release GitHub** : Dépôt public créé, code source poussé, tag `v1.0.0` et GitHub Release avec APK attaché publiée.
+- [x] **Résolution du Bug Critique d'Ingestion CV** :
+  - Intégration de `com.tom_roush:pdfbox-android:2.0.27.0` avec initialisation `PDFBoxResourceLoader.init(context)`.
+  - Décompression intégrale des flux PDF compressés `FlateDecode` et des tables de polices.
+  - Décompression native des archives DOCX via `ZipInputStream` et parsing XML pur via `XmlPullParser` sur `word/document.xml` sans aucune dépendance lourde.
+  - Détection automatique et fiable des types MIME et extensions.
+  - Validation sur terminal physique réel de l'extraction intégrale du CV source et de l'affichage du texte brut lisible.
 
 ---
 

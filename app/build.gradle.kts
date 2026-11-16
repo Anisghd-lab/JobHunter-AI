@@ -100,6 +100,9 @@ dependencies {
     // Image loading
     implementation(libs.coil.compose)
 
+    // PDF Extraction Engine (Native Android port of Apache PDFBox)
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 }

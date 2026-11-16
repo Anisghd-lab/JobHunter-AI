@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleIntent(intent)
 
         val db = AppDatabase.getInstance(this)
         val offerDao = db.jobOfferDao()
@@ -124,6 +125,24 @@ class MainActivity : ComponentActivity() {
                             onTabSelected = { currentTab = it }
                         )
                     }
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: android.content.Intent?) {
+        val testPath = intent?.getStringExtra("import_path")
+        if (!testPath.isNullOrBlank()) {
+            val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
+            scope.launch {
+                val file = File(testPath)
+                if (file.exists()) {
+                    handleImportCv(android.net.Uri.fromFile(file))
                 }
             }
         }
