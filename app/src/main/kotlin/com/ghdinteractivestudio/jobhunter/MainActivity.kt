@@ -131,28 +131,38 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun handleImportCv(uri: android.net.Uri) = withContext(Dispatchers.IO) {
         runCatching {
-            val text = CvParser.extractText(this@MainActivity, uri)
+            val extractedData = CvParser.parseCvFile(this@MainActivity, uri)
+            
+            // Check if user has entered an LLM API key
             val llm = LlmClient(LlmConfig())
             val engine = CvTailoringEngine(llm)
 
-            // Try to parse using LLM, or fallback to heuristics if offline
-            val parsedResult = engine.parseCv(text).getOrElse {
-                UserProfile(
-                    fullName = "Candidat",
-                    title = "Développeur Senior",
-                    skills = listOf("Kotlin", "Android", "Jetpack Compose", "Coroutines", "Room", "Git")
-                )
+            // Try LLM refinement or use 100% deterministic real data from the actual file
+            val parsedResult = if (extractedData.rawText.isNotBlank()) {
+                engine.parseCv(extractedData.rawText).getOrElse {
+                    extractedData.deterministicProfile
+                }
+            } else {
+                extractedData.deterministicProfile
             }
 
+            // Ensure source file details and raw content are preserved for full viewing
+            val finalProfile = parsedResult.copy(
+                sourceCvFileName = extractedData.fileName,
+                sourceCvFormat = extractedData.format,
+                rawCvContent = extractedData.rawText,
+                parsedAt = System.currentTimeMillis()
+            )
+
             val db = AppDatabase.getInstance(this@MainActivity)
-            db.userProfileDao().saveProfile(UserProfileEntity.fromDomain(parsedResult))
+            db.userProfileDao().saveProfile(UserProfileEntity.fromDomain(finalProfile))
 
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "CV importé et analysé avec succès !", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "CV réel '${extractedData.fileName}' importé et analysé !", Toast.LENGTH_SHORT).show()
             }
         }.onFailure { err ->
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "Erreur import : ${err.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "Erreur analyse CV : ${err.message}", Toast.LENGTH_LONG).show()
             }
         }
     }

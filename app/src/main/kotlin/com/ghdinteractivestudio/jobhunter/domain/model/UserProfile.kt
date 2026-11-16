@@ -21,16 +21,29 @@ data class EducationItem(
 )
 
 @Serializable
+data class CertificationItem(
+    val name: String,
+    val issuer: String = "",
+    val year: String = ""
+)
+
+@Serializable
 data class UserProfile(
     val fullName: String = "",
     val email: String = "",
     val phone: String = "",
+    val address: String = "",
     val title: String = "",
     val summary: String = "",
     val skills: List<String> = emptyList(),
+    val softSkills: List<String> = emptyList(),
     val experiences: List<ExperienceItem> = emptyList(),
     val educations: List<EducationItem> = emptyList(),
+    val certifications: List<CertificationItem> = emptyList(),
     val languages: List<String> = emptyList(),
+    val sourceCvFileName: String = "",
+    val sourceCvFormat: String = "",
     val sourceCvPath: String = "",
-    val sourceCvFormat: String = "PDF"
+    val rawCvContent: String = "",
+    val parsedAt: Long = 0L
 )
