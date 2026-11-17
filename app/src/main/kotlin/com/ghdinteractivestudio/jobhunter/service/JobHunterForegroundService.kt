@@ -115,7 +115,7 @@ class JobHunterForegroundService : Service() {
                     }
 
                     // Autonomous Quota-Guarded Auto-Apply across top Room + new scan candidates
-                    val batchReport = if (profile != null && settings.autoApplyEnabled) {
+                    val batchReport = if (profile != null && (settings.autoApplyEnabled || settings.agentActive247)) {
                         ApplicationAutomationManager.runAutonomousAutoApplyBatch(
                             context = applicationContext,
                             profile = profile,

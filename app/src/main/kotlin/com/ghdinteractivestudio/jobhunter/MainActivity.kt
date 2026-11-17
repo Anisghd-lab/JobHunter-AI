@@ -92,6 +92,10 @@ class MainActivity : ComponentActivity() {
         val profileDao = db.userProfileDao()
         val settingsRepo = SettingsRepository.getInstance(this)
 
+        lifecycleScope.launch(Dispatchers.IO) {
+            ApplicationAutomationManager.purgeDuplicateOffers(this@MainActivity)
+        }
+
         handleIntent(intent)
 
         // Observe Room Database safely tied to Activity lifecycle (zero leaks)
@@ -733,6 +737,24 @@ class MainActivity : ComponentActivity() {
         sendSilentEmail: Boolean = true,
         forceTailoredCv: Boolean? = null
     ) = withContext(Dispatchers.IO) {
+        val isAlreadyApplied = offer.status == JobStatus.APPLIED || offer.autoApplied
+        if (isAlreadyApplied) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@MainActivity, "Vous avez déjà postulé à cette offre ✓", Toast.LENGTH_SHORT).show()
+                if (offer.generatedLetter.isNotBlank() && offer.tailoredCvPath.isNotBlank()) {
+                    activeOutcomeState.value = ApplicationOutcome(
+                        updatedOffer = offer,
+                        sentSilentlyByEmail = false,
+                        requiresWebAction = offer.recruiterEmail.isBlank(),
+                        requiresEmailAppIntent = false,
+                        message = "Dossier déjà envoyé pour ce poste (${offer.recruiterEmail}) ✓",
+                        usesOriginalCv = offer.tailoredCvPath.contains("_Original_")
+                    )
+                }
+            }
+            return@withContext
+        }
+
         busyOfferIdState.value = offer.id
         val res = ApplicationAutomationManager.prepareAndApply(
             context = this@MainActivity,

@@ -28,7 +28,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 data class ApplicationOutcome(
     val updatedOffer: JobOffer,
@@ -184,6 +187,41 @@ object ApplicationAutomationManager {
         val liveOffer = verifyLiveOfferAndArchiveIfExpired(context, offer, scanner)
             .getOrElse { return@withContext Result.failure(it) }
 
+        val db = AppDatabase.getInstance(context)
+        val dao = db.jobOfferDao()
+        val candEmail = liveOffer.recruiterEmail.trim().lowercase()
+        val candSig = normalizeSignatureKey(liveOffer.company, liveOffer.title)
+        val appliedList = dao.getAppliedSignatures()
+        val alreadyAppliedOffer = appliedList.firstOrNull {
+            (candEmail.isNotBlank() && it.recruiterEmail.trim().lowercase() == candEmail) ||
+            normalizeSignatureKey(it.company, it.title) == candSig ||
+            it.id == liveOffer.id
+        }
+
+        // Strict Anti-Duplicate Guard: never re-apply to an already applied offer or recruiter email!
+        if (alreadyAppliedOffer != null && (liveOffer.status == JobStatus.APPLIED || liveOffer.autoApplied || isAutonomous || sendSilentEmailIfConfigured)) {
+            val appliedDate = if (alreadyAppliedOffer.appliedAt > 0L) {
+                SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(alreadyAppliedOffer.appliedAt))
+            } else "précédemment"
+            return@withContext Result.success(
+                ApplicationOutcome(
+                    updatedOffer = liveOffer.copy(
+                        status = JobStatus.APPLIED,
+                        autoApplied = alreadyAppliedOffer.autoApplied || liveOffer.autoApplied,
+                        appliedAt = if (alreadyAppliedOffer.appliedAt > 0L) alreadyAppliedOffer.appliedAt else liveOffer.appliedAt,
+                        generatedLetter = alreadyAppliedOffer.generatedLetter.ifBlank { liveOffer.generatedLetter },
+                        tailoredCvPath = alreadyAppliedOffer.tailoredCvPath.ifBlank { liveOffer.tailoredCvPath },
+                        letterPath = alreadyAppliedOffer.letterPath.ifBlank { liveOffer.letterPath }
+                    ),
+                    sentSilentlyByEmail = false,
+                    requiresWebAction = false,
+                    requiresEmailAppIntent = false,
+                    message = "Doublon évité : candidature déjà envoyée à ${liveOffer.company} ($candEmail) le $appliedDate ✓",
+                    usesOriginalCv = true
+                )
+            )
+        }
+
         val targetEmail = liveOffer.recruiterEmail
         val engine = CvTailoringEngine(settings)
         val offerIsFrench = engine.isFrenchOffer(liveOffer)
@@ -287,10 +325,11 @@ object ApplicationAutomationManager {
                     .removePrefix("Objet:")
                     .removePrefix("Subject:")
                     .trim()
+                val briefEmail = buildBriefEmailBody(liveOffer, migratedProfile, offerIsFrench)
                 val emailRes = dispatcher.sendApplicationEmail(
                     recipientEmail = targetEmail,
                     subject = "$cleanSubject - ${migratedProfile.fullName}",
-                    bodyText = coverLetter,
+                    bodyText = briefEmail,
                     attachments = attachments
                 )
                 if (emailRes.isSuccess) {
@@ -298,6 +337,8 @@ object ApplicationAutomationManager {
                     finalStatus = JobStatus.APPLIED
                     channelLabel = "Email auto envoyé à $targetEmail"
                     resultMessage = "Candidature envoyée à $targetEmail ($cvKindLabel + Lettre MLDP) !"
+                    com.ghdinteractivestudio.jobhunter.data.local.SettingsRepository.getInstance(context)
+                        .update { it.copy(smtpAuthPaused = false) }
                 } else {
                     val errMsg = emailRes.exceptionOrNull()?.message.orEmpty()
                     if (errMsg.contains("535") || errMsg.contains("refusés") || errMsg.contains("AUTH005")) {
@@ -404,7 +445,8 @@ object ApplicationAutomationManager {
 
     /**
      * Upserts fresh web scan results without erasing already-discovered valid recruiter emails,
-     * timestamps, or AI analysis on surviving DETECTED offers.
+     * timestamps, or AI analysis on surviving DETECTED offers, while strictly deduplicating
+     * against offers that were already applied.
      */
     suspend fun preserveEnrichmentsAndReplaceDetected(
         context: Context,
@@ -413,14 +455,43 @@ object ApplicationAutomationManager {
         if (scannedOffers.isEmpty()) return@withContext
         val dao = AppDatabase.getInstance(context).jobOfferDao()
         val existingMap = dao.getDetectedOffersOnce().associateBy { it.id }
+        val appliedList = dao.getAppliedSignatures()
+        val appliedEmails = appliedList.mapNotNull { it.recruiterEmail.trim().lowercase().takeIf(String::isNotBlank) }.toSet()
+        val appliedSigs = appliedList.map { normalizeSignatureKey(it.company, it.title) }.toSet()
 
-        val merged = scannedOffers.map { offer ->
+        // 1. Deduplicate incoming scannedOffers within current scrape cycle
+        val distinctScanned = mutableListOf<JobOffer>()
+        val seenEmails = mutableSetOf<String>()
+        val seenSigs = mutableSetOf<String>()
+
+        for (offer in scannedOffers) {
+            val email = offer.recruiterEmail.trim().lowercase()
+            val sig = normalizeSignatureKey(offer.company, offer.title)
+            if (sig in seenSigs || (email.isNotBlank() && email in seenEmails)) {
+                continue
+            }
+            seenSigs.add(sig)
+            if (email.isNotBlank()) seenEmails.add(email)
+            distinctScanned.add(offer)
+        }
+
+        // 2. Filter out any offer already applied to
+        val toInsertDetected = mutableListOf<JobOfferEntity>()
+        for (offer in distinctScanned) {
+            val email = offer.recruiterEmail.trim().lowercase()
+            val sig = normalizeSignatureKey(offer.company, offer.title)
+
+            // If already applied to this company/title or recruiter email, exclude from fresh DETECTED offers
+            if (sig in appliedSigs || (email.isNotBlank() && email in appliedEmails)) {
+                continue
+            }
+
             val cleanNewEmail = offer.recruiterEmail.takeIf { HtmlSanitizer.isValidRecruiterEmail(it) }.orEmpty()
             val prev = existingMap[offer.id]
             val prevValidEmail = prev?.recruiterEmail?.takeIf { HtmlSanitizer.isValidRecruiterEmail(it) }.orEmpty()
             val finalEmail = cleanNewEmail.ifBlank { prevValidEmail }
 
-            offer.copy(
+            val merged = offer.copy(
                 recruiterEmail = finalEmail,
                 applicationMethod = if (finalEmail.isNotBlank()) "EMAIL" else offer.applicationMethod,
                 lastAutoAttemptAt = prev?.lastAutoAttemptAt ?: 0L,
@@ -428,11 +499,81 @@ object ApplicationAutomationManager {
                 deadlineAt = if (offer.deadlineAt > 0L) offer.deadlineAt else (prev?.deadlineAt ?: 0L),
                 deadlineLabel = offer.deadlineLabel.ifBlank { prev?.deadlineLabel.orEmpty() }
             )
+            toInsertDetected.add(JobOfferEntity.fromDomain(merged))
         }
 
         dao.clearDetectedOffers()
-        dao.insertAll(merged.map { JobOfferEntity.fromDomain(it) })
+        dao.insertAll(toInsertDetected)
         dao.sanitizeInvalidRecruiterEmails()
+    }
+
+    /**
+     * Purges redundant duplicate offers already stored in the local database.
+     */
+    suspend fun purgeDuplicateOffers(context: Context) = withContext(Dispatchers.IO) {
+        runCatching {
+            val dao = AppDatabase.getInstance(context).jobOfferDao()
+            val allOffers = dao.getAppliedSignatures()
+            val seenSignatures = mutableSetOf<String>()
+            val seenEmails = mutableSetOf<String>()
+            for (offer in allOffers) {
+                val sig = normalizeSignatureKey(offer.company, offer.title)
+                val email = offer.recruiterEmail.trim().lowercase()
+                val isDuplicate = (sig.isNotBlank() && sig in seenSignatures) ||
+                    (email.isNotBlank() && email in seenEmails)
+                if (isDuplicate) {
+                    dao.deleteById(offer.id)
+                } else {
+                    if (sig.isNotBlank()) seenSignatures.add(sig)
+                    if (email.isNotBlank()) seenEmails.add(email)
+                }
+            }
+        }
+    }
+
+    /**
+     * Generates a concise, polite human cover email body introducing the attached CV and MLDP motivation letter.
+     */
+    fun buildBriefEmailBody(
+        offer: JobOffer,
+        profile: UserProfile,
+        isFrench: Boolean
+    ): String {
+        val cleanName = profile.fullName.ifBlank { "Candidat" }
+        val phoneLine = profile.phone.takeIf { it.isNotBlank() }?.let { "Tél : $it\n" }.orEmpty()
+        val emailLine = profile.email.takeIf { it.isNotBlank() }?.let { "Email : $it" }.orEmpty()
+
+        return if (isFrench) {
+            """
+            Bonjour,
+
+            Je vous adresse ma candidature pour le poste de ${offer.title} au sein de votre établissement ${offer.company}.
+
+            Vous trouverez ci-joint mon Curriculum Vitae ainsi que ma lettre de motivation détaillée précisant mes compétences et mon expérience pour ce poste.
+
+            Restant à votre entière disposition pour convenir d'un entretien ou tout échange complémentaire, je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.
+
+            $cleanName
+            $phoneLine$emailLine
+            """.trimIndent()
+        } else {
+            val phoneLineEn = profile.phone.takeIf { it.isNotBlank() }?.let { "Phone: $it\n" }.orEmpty()
+            val emailLineEn = profile.email.takeIf { it.isNotBlank() }?.let { "Email: $it" }.orEmpty()
+            """
+            Dear Hiring Team,
+
+            Please accept my application for the ${offer.title} position at ${offer.company}.
+
+            Attached please find my Resume and detailed Cover Letter outlining my qualifications and background for this role.
+
+            I look forward to discussing how my experience can contribute to your team.
+
+            Best regards,
+
+            $cleanName
+            $phoneLineEn$emailLineEn
+            """.trimIndent()
+        }
     }
 
     /**

@@ -12,9 +12,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/MainActivity.kt": {
-    "mtime": 1794923861.7252364,
-    "seen": 1794924063.2022777,
-    "ast_hash": "398c6e4c7b370e0d7d05be376fca6d59",
+    "mtime": 1794937749.2545276,
+    "seen": 1794938524.5816371,
+    "ast_hash": "9dc0f0deb9b2d5123e6d0d13095e7c83",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/AppDatabase.kt": {
@@ -108,9 +108,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/service/JobHunterForegroundService.kt": {
-    "mtime": 1794933523.1928427,
-    "seen": 1794933935.896107,
-    "ast_hash": "9962e407024f50cefe5027db9a0eaee0",
+    "mtime": 1794937781.5225275,
+    "seen": 1794938524.5816922,
+    "ast_hash": "de313852a19e9f8e14b7a15b17305900",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/service/JobHunterScheduler.kt": {
@@ -150,9 +150,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/screens/RadarScreen.kt": {
-    "mtime": 1794931691.7424338,
-    "seen": 1794932033.6591382,
-    "ast_hash": "85fd2894db7b130365c5d32cfb4df06e",
+    "mtime": 1794938019.8705275,
+    "seen": 1794938524.5817053,
+    "ast_hash": "37367e7577eaa33ec91fb31e92d8d585",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/theme/Motion.kt": {
@@ -204,9 +204,9 @@
     "semantic_hash": ""
   },
   "PROJECT_STATE.md": {
-    "mtime": 1794932157.851003,
-    "seen": 1794933935.8961353,
-    "ast_hash": "49d99703d20c208b57f5c3af2147f67b",
+    "mtime": 1794934276.506243,
+    "seen": 1794938524.5817223,
+    "ast_hash": "6522b39c74004e56b2f24a64e36771bf",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-hdpi/ic_launcher.png": {
@@ -300,15 +300,15 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/SettingsRepository.kt": {
-    "mtime": 1794923085.8132367,
-    "seen": 1794924063.2023036,
-    "ast_hash": "ae57e9a56c6f7cef63cc23d11a69daa5",
+    "mtime": 1794937506.7825277,
+    "seen": 1794938524.5816505,
+    "ast_hash": "b0f067ea10f25720803a7665d06b02c2",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/automation/ApplicationAutomationManager.kt": {
-    "mtime": 1794931034.145687,
-    "seen": 1794932033.6590078,
-    "ast_hash": "7e83f64d5274cd61301783f4b3ebe5f0",
+    "mtime": 1794938258.4758034,
+    "seen": 1794938524.581666,
+    "ast_hash": "4200c8e5789409ae66671e903be8a205",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/document/HtmlSanitizer.kt": {

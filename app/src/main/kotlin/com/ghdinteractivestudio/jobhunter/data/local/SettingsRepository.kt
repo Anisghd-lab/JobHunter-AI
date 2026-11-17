@@ -73,7 +73,7 @@ data class AppSettings(
     val smtpPassword: String = "",
     val gmailOAuthToken: String = "",
     val agentActive247: Boolean = true,
-    val autoApplyEnabled: Boolean = false,
+    val autoApplyEnabled: Boolean = true,
     val autoApplyMinScore: Int = 50,
     val adaptCvPerOffer: Boolean = false,
     val aiAutonomousEmailControl: Boolean = true,
@@ -148,6 +148,21 @@ class SettingsRepository private constructor(context: Context) {
                 .apply()
         }
 
+        // Autonomous 50% matching, unpaused SMTP and auto-apply activation
+        if (!prefs.getBoolean("auto_apply_v4_autonomous", false)) {
+            prefs.edit()
+                .putInt("auto_apply_min_score", 50)
+                .putInt("auto_apply_max_day", 50)
+                .putInt("auto_apply_max_cycle", 12)
+                .putBoolean("auto_apply", true)
+                .putBoolean("smtp_auth_paused", false)
+                .putBoolean("prefer_yahoo_app", false)
+                .putBoolean("auto_apply_v4_autonomous", true)
+                .apply()
+        }
+
+        val hasPwd = !prefs.getString("smtp_password", "").isNullOrBlank()
+
         return AppSettings(
             activeProvider = prov,
             activeModel = prefs.getString("active_model", "openrouter/free") ?: "openrouter/free",
@@ -162,7 +177,7 @@ class SettingsRepository private constructor(context: Context) {
             smtpPassword = prefs.getString("smtp_password", "") ?: "",
             gmailOAuthToken = prefs.getString("gmail_oauth_token", "") ?: "",
             agentActive247 = prefs.getBoolean("agent_247", true),
-            autoApplyEnabled = prefs.getBoolean("auto_apply", false),
+            autoApplyEnabled = prefs.getBoolean("auto_apply", true),
             autoApplyMinScore = prefs.getInt("auto_apply_min_score", 50),
             adaptCvPerOffer = prefs.getBoolean("adapt_cv_per_offer", false),
             aiAutonomousEmailControl = prefs.getBoolean("ai_auto_email", true),
@@ -170,7 +185,7 @@ class SettingsRepository private constructor(context: Context) {
             followUpDelayDays = prefs.getInt("follow_up_days", 5),
             preferInstalledYahooApp = prefs.getBoolean("prefer_yahoo_app", false),
             connectedYahooPackage = prefs.getString("connected_yahoo_pkg", "") ?: "",
-            smtpAuthPaused = prefs.getBoolean("smtp_auth_paused", false),
+            smtpAuthPaused = if (hasPwd) false else prefs.getBoolean("smtp_auth_paused", false),
             autoApplyEmailOnly = prefs.getBoolean("auto_apply_email_only", false),
             autoApplyMaxPerCycle = prefs.getInt("auto_apply_max_cycle", 12),
             autoApplyMaxPerDay = prefs.getInt("auto_apply_max_day", 50),

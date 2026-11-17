@@ -44,6 +44,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.ui.draw.alpha
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -124,6 +126,8 @@ fun RadarScreen(
                 "INTERNATIONAL" -> offer.regionScope == "INTERNATIONAL"
                 "REMOTE" -> offer.isRemote || offer.workMode == "REMOTE"
                 "ONSITE" -> !offer.isRemote || offer.workMode == "ONSITE" || offer.workMode == "HYBRID"
+                "PENDING" -> offer.status != JobStatus.APPLIED && !offer.autoApplied
+                "APPLIED" -> offer.status == JobStatus.APPLIED || offer.autoApplied
                 else -> true
             }
             val matchesQuery = searchQuery.isBlank() ||
@@ -134,9 +138,16 @@ fun RadarScreen(
                 offer.tags.any { it.contains(searchQuery, ignoreCase = true) }
 
             matchesFilter && matchesQuery
-        }
+        }.sortedWith(
+            compareBy<JobOffer> { it.status == JobStatus.APPLIED || it.autoApplied }
+                .thenByDescending { HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
+                .thenByDescending { it.matchScore }
+                .thenByDescending { it.detectedAt }
+        )
     }
 
+    val appliedCount = offers.count { it.status == JobStatus.APPLIED || it.autoApplied }
+    val pendingCount = offers.size - appliedCount
     val directEmailCount = offers.count { it.recruiterEmail.isNotBlank() && HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
     val dzCount = offers.count { it.regionScope == "ALGERIA" }
     val gulfCount = offers.count { it.regionScope == "GULF" }
@@ -222,7 +233,9 @@ fun RadarScreen(
         ) {
             listOf(
                 "ALL" to "Tout (${offers.size})",
+                "PENDING" to "⚡ À postuler ($pendingCount)",
                 "DIRECT_EMAIL" to "📧 Email Direct ($directEmailCount)",
+                "APPLIED" to "✓ Postulées ($appliedCount)",
                 "ALGERIA" to "🇩🇿 Algérie ($dzCount)",
                 "GULF" to "🏜️ Golfe ($gulfCount)",
                 "INTERNATIONAL" to "🌍 Monde ($intlCount)",
@@ -318,15 +331,17 @@ fun JobOfferCard(
 ) {
     val dark = LocalDark.current
     var expanded by remember { mutableStateOf(false) }
+    val isApplied = offer.status == JobStatus.APPLIED || offer.autoApplied
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (isApplied) Modifier.alpha(0.6f) else Modifier)
             .glassCard()
             .padding(16.dp)
     ) {
         Column {
-            // Top badges row: Platform + WorkMode + Required Format
+            // Top badges row: Platform + WorkMode + Required Format + (isApplied Badge)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -341,30 +356,49 @@ fun JobOfferCard(
                         Text(
                             text = offer.sourcePlatform,
                             style = Type.label.monospaced,
-                            color = Palette.electricBlue
+                            color = if (isApplied) Palette.secondary else Palette.electricBlue
                         )
                     }
 
-                    val regionColor = when (offer.regionScope) {
-                        "ALGERIA" -> Palette.emeraldAccent
-                        "GULF" -> Palette.cyanNeon
-                        else -> Palette.attention
-                    }
-                    Box(
-                        modifier = Modifier
-                            .background(regionColor.copy(alpha = 0.14f), Capsule())
-                            .border(0.5.dp, regionColor.copy(alpha = 0.4f), Capsule())
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = when (offer.regionScope) {
-                                "ALGERIA" -> if (offer.isRemote) "🇩🇿 DZ • Remote" else "🇩🇿 DZ • Présentiel"
-                                "GULF" -> if (offer.isRemote) "🏜️ Golfe • Remote" else "🏜️ Golfe • Présentiel"
-                                else -> if (offer.isRemote) "🌍 Remote" else "🌍 Présentiel"
-                            },
-                            style = Type.label.bold,
-                            color = regionColor
-                        )
+                    if (isApplied) {
+                        Box(
+                            modifier = Modifier
+                                .background(Palette.emeraldAccent.copy(alpha = 0.18f), Capsule())
+                                .border(0.5.dp, Palette.emeraldAccent.copy(alpha = 0.5f), Capsule())
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Palette.emeraldAccent, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = if (offer.autoApplied) "✓ Envoyé Auto" else "✓ Postulé",
+                                    style = Type.label.bold,
+                                    color = Palette.emeraldAccent
+                                )
+                            }
+                        }
+                    } else {
+                        val regionColor = when (offer.regionScope) {
+                            "ALGERIA" -> Palette.emeraldAccent
+                            "GULF" -> Palette.cyanNeon
+                            else -> Palette.attention
+                        }
+                        Box(
+                            modifier = Modifier
+                                .background(regionColor.copy(alpha = 0.14f), Capsule())
+                                .border(0.5.dp, regionColor.copy(alpha = 0.4f), Capsule())
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = when (offer.regionScope) {
+                                    "ALGERIA" -> if (offer.isRemote) "🇩🇿 DZ • Remote" else "🇩🇿 DZ • Présentiel"
+                                    "GULF" -> if (offer.isRemote) "🏜️ Golfe • Remote" else "🏜️ Golfe • Présentiel"
+                                    else -> if (offer.isRemote) "🌍 Remote" else "🌍 Présentiel"
+                                },
+                                style = Type.label.bold,
+                                color = regionColor
+                            )
+                        }
                     }
                 }
 
@@ -584,28 +618,63 @@ fun JobOfferCard(
             Spacer(Modifier.height(8.dp))
 
             // Uniform Action Buttons Row (equal size, single-line, zero overflow)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                GlassSoftButton(
-                    text = "Analyser IA",
-                    icon = Icons.Default.AutoAwesome,
-                    accentColor = Palette.electricBlue,
-                    enabled = !isBusy,
-                    onClick = onAnalyzeClick,
-                    modifier = Modifier.weight(1f)
-                )
+            if (isApplied) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(38.dp)
+                            .background(Color(0x1810B981), Capsule())
+                            .border(0.5.dp, Palette.emeraldAccent.copy(alpha = 0.45f), Capsule()),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Palette.emeraldAccent, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (offer.autoApplied) "Envoyé Auto ✓" else "Postulé ✓",
+                                style = Type.label.bold,
+                                color = Palette.emeraldAccent
+                            )
+                        }
+                    }
 
-                GlassSolidButton(
-                    text = if (offer.recruiterEmail.isNotBlank()) "Postuler Auto" else "Postuler",
-                    icon = Icons.AutoMirrored.Filled.Send,
-                    containerColor = Palette.emeraldSolidBg,
-                    enabled = !isBusy,
-                    isLoading = isBusy,
-                    onClick = onApplyClick,
-                    modifier = Modifier.weight(1f)
-                )
+                    GlassSoftButton(
+                        text = "Voir Dossier",
+                        icon = Icons.Default.Visibility,
+                        accentColor = Palette.electricBlue,
+                        enabled = !isBusy,
+                        onClick = onApplyClick,
+                        modifier = Modifier.weight(0.85f)
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    GlassSoftButton(
+                        text = "Analyser IA",
+                        icon = Icons.Default.AutoAwesome,
+                        accentColor = Palette.electricBlue,
+                        enabled = !isBusy,
+                        onClick = onAnalyzeClick,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    GlassSolidButton(
+                        text = if (offer.recruiterEmail.isNotBlank()) "Postuler Auto" else "Postuler",
+                        icon = Icons.AutoMirrored.Filled.Send,
+                        containerColor = Palette.emeraldSolidBg,
+                        enabled = !isBusy,
+                        isLoading = isBusy,
+                        onClick = onApplyClick,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }
