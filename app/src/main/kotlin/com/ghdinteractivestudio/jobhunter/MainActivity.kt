@@ -162,6 +162,11 @@ class MainActivity : ComponentActivity() {
                                 coroutineScope.launch {
                                     handleApplyToJob(offer, settingsRepo)
                                 }
+                            },
+                            onRegenerateOfferClick = { offer ->
+                                coroutineScope.launch {
+                                    handleApplyToJob(offer, settingsRepo, sendSilentEmail = false)
+                                }
                             }
                         )
 
@@ -439,7 +444,11 @@ class MainActivity : ComponentActivity() {
         busyOfferIdState.value = null
     }
 
-    private suspend fun handleApplyToJob(offer: JobOffer, settingsRepo: SettingsRepository) = withContext(Dispatchers.IO) {
+    private suspend fun handleApplyToJob(
+        offer: JobOffer,
+        settingsRepo: SettingsRepository,
+        sendSilentEmail: Boolean = true
+    ) = withContext(Dispatchers.IO) {
         busyOfferIdState.value = offer.id
         val res = ApplicationAutomationManager.prepareAndApply(
             context = this@MainActivity,
@@ -447,7 +456,7 @@ class MainActivity : ComponentActivity() {
             profile = userProfileState.value,
             settings = settingsRepo.settings.value,
             scanner = scanner,
-            sendSilentEmailIfConfigured = true
+            sendSilentEmailIfConfigured = sendSilentEmail
         )
         withContext(Dispatchers.Main) {
             res.onSuccess { outcome ->

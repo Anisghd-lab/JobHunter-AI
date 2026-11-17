@@ -95,6 +95,7 @@ fun RadarScreen(
     onRefreshScanClick: () -> Unit,
     onAnalyzeOfferClick: (JobOffer) -> Unit,
     onApplyClick: (JobOffer) -> Unit,
+    onRegenerateOfferClick: (JobOffer) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val rawOffers by offersFlow.collectAsState()
@@ -316,6 +317,8 @@ fun RadarScreen(
     if (activeOutcome != null) {
         ApplyAssistantDialog(
             outcome = activeOutcome,
+            isRegenerating = busyOfferId == activeOutcome.updatedOffer.id,
+            onRegenerate = { onRegenerateOfferClick(activeOutcome.updatedOffer) },
             onDismiss = onDismissOutcome,
             onMarkApplied = { onMarkAsApplied(activeOutcome.updatedOffer) }
         )
@@ -643,6 +646,8 @@ fun JobOfferCard(
 @Composable
 fun ApplyAssistantDialog(
     outcome: ApplicationOutcome,
+    isRegenerating: Boolean = false,
+    onRegenerate: () -> Unit = {},
     onDismiss: () -> Unit,
     onMarkApplied: () -> Unit
 ) {
@@ -717,17 +722,33 @@ fun ApplyAssistantDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Lettre de Motivation Générée :", style = Type.label.bold, color = Palette.text)
-                    TextButton(
-                        onClick = {
-                            val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cb.setPrimaryClip(ClipData.newPlainText("Lettre", offer.generatedLetter))
-                            Toast.makeText(context, "Lettre copiée !", Toast.LENGTH_SHORT).show()
+                    Text("Lettre Ciblée :", style = Type.label.bold, color = Palette.text)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (!outcome.sentSilentlyByEmail) {
+                            TextButton(
+                                onClick = onRegenerate,
+                                enabled = !isRegenerating
+                            ) {
+                                if (isRegenerating) {
+                                    CircularProgressIndicator(modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                }
+                                Spacer(Modifier.width(3.dp))
+                                Text("Régénérer", style = Type.label.bold)
+                            }
                         }
-                    ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Copier", style = Type.label.bold)
+                        TextButton(
+                            onClick = {
+                                val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cb.setPrimaryClip(ClipData.newPlainText("Lettre", offer.generatedLetter))
+                                Toast.makeText(context, "Lettre copiée !", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Copier", style = Type.label.bold)
+                        }
                     }
                 }
 

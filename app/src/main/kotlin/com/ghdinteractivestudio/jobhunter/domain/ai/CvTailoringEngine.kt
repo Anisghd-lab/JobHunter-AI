@@ -2,10 +2,14 @@ package com.ghdinteractivestudio.jobhunter.domain.ai
 
 import com.ghdinteractivestudio.jobhunter.data.local.AppSettings
 import com.ghdinteractivestudio.jobhunter.domain.document.MldpCoverLetterData
+import com.ghdinteractivestudio.jobhunter.domain.model.CertificationItem
+import com.ghdinteractivestudio.jobhunter.domain.model.EducationItem
+import com.ghdinteractivestudio.jobhunter.domain.model.ExperienceItem
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
 import com.ghdinteractivestudio.jobhunter.domain.model.UserProfile
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.text.Normalizer
 
 @Serializable
 data class MldpLetterAiPayload(
@@ -198,44 +202,47 @@ Réponds UNIQUEMENT en JSON strict :
     }
 
     /**
-     * Generates a structured Cover Letter adhering strictly to the official MLDP standard:
-     * 1. Sender coordinates (Top-Left)
-     * 2. Recipient coordinates (Middle-Right)
-     * 3. Place & Date (Right)
-     * 4. Clear Subject & Formal Salutation
-     * 5. 4-5 MLDP narrative paragraphs (Present yourself & request, Company interest & role alignment,
-     *    Self-valorization with real skills/experiences/diplomas, Interview request & CV invitation)
-     * 6. MLDP Formal Closing Formula
-     * 7. Signature (Bottom-Right)
+     * Generates a smart, targeted Cover Letter strictly following MLDP 7-part spatial structure:
+     * pre-filters CV skills, experiences, certifications and diplomas to include ONLY facts
+     * directly relevant to the target job offer (never a whole-CV dump).
      */
     suspend fun generateMldpCoverLetter(offer: JobOffer, profile: UserProfile): MldpCoverLetterData {
         val offerLangFrench = looksLikeFrenchOffer(offer)
-        val systemInstruction = "Tu rédiges des lettres de motivation selon la méthodologie officielle MLDP (Se présenter, Formuler la demande & valoriser l'entreprise, Exprimer ses attentes, Se valoriser par des preuves réelles du CV, Solliciter un entretien et inviter à consulter le CV ci-joint, Formule de politesse)."
+        val targeted = selectTargetedProfile(offer, profile)
+
+        val systemInstruction = "Tu rédiges des lettres de motivation exécutives ultra-ciblées selon la structure MLDP (Se présenter brièvement en lien avec le poste, Valoriser l'entreprise & exprimer ses attentes, Démontrer ses compétences clés pertinentes avec 1-2 preuves réelles du CV, Solliciter un entretien & renvoyer au CV ci-joint, Formule de politesse)."
+
+        val skillsPrompt = targeted.skills.joinToString(", ").ifBlank { "Adaptabilité, organisation" }
+        val expPrompt = targeted.experiences.joinToString("; ") {
+            "${it.title} chez ${it.company} (${it.period}): ${it.description.take(220)}"
+        }.ifBlank { "Expérience transférable en coordination et gestion opérationnelle" }
+        val certPrompt = targeted.certifications.joinToString("; ") {
+            "${it.name}${if (it.issuer.isNotBlank()) " (${it.issuer})" else ""}"
+        }
+        val eduPrompt = targeted.education?.let {
+            "${it.degree}${if (it.institution.isNotBlank()) " (${it.institution})" else ""}"
+        } ?: ""
 
         val prompt = """
-Rédige les sections d'une lettre de motivation authentique en suivant SCRUPULEUSEMENT le modèle MLDP (http://www.missionlocaledp.org/emploi/lettre-de-motivation) au format JSON strict.
+Rédige les 4 paragraphes d'une lettre de motivation ciblée selon la méthodologie MLDP au format JSON strict.
 
-RÈGLES OBLIGATOIRES :
-1. Langue : ${if (offerLangFrench) "FRANÇAIS" else "ANGLAIS (si l'offre est en anglais, traduis la structure MLDP en anglais professionnel soutenu)"}.
-2. ZÉRO INVENTION : Utilise uniquement les vrais diplômes, expériences, entreprises, compétences et langues du candidat ci-dessous.
-3. Les 4 paragraphes du corps DOIVENT suivre cet enchaînement exact MLDP :
-   - "paragraphPresentAndRequest" : (1. Se présenter & Formuler sa requête) Titre/formation réelle du candidat + candidature claire pour le poste précis de ${offer.title}.
-   - "paragraphExpectationsAndCompany" : (2. Valoriser l'entreprise & Exprimer ses souhaits) Pourquoi choisir ${offer.company} (secteur/missions de l'annonce) et quelles responsabilités le candidat souhaite y exercer.
-   - "paragraphSelfValorization" : (3. Se valoriser) Preuves concrètes tirées des expériences, certifications, compétences clés et langues du CV réel.
-   - "paragraphInterviewAndCvInvite" : (4. Solliciter un entretien & suggérer la lecture du CV ci-joint) Rappel explicite invitant le recruteur à découvrir le CV ci-joint qui détaille le parcours et demande de rencontre/entretien.
-4. "closingFormula" : Formule de politesse complète MLDP (remerciement pour l'attention portée à la candidature + salutations distinguées).
+RÈGLES STRICTES D'INTELLIGENCE & DE CIBLAGE :
+1. Langue : ${if (offerLangFrench) "FRANÇAIS" else "ANGLAIS professionnel"}.
+2. NE RÉCITE JAMAIS TOUT LE CV : cite UNIQUEMENT les compétences, l'expérience et la formation pré-sélectionnées ci-dessous qui répondent directement au poste "${offer.title}". INTERDICTION d'inventer quoi que ce soit et INTERDICTION d'ajouter des outils ou métiers hors sujet.
+3. Pas d'ouverture robotique « Je suis [Nom] » (le nom est déjà en en-tête et signature) et pas de liste exhaustive de tous les diplômes/certifications.
+4. Concision & impact : 2 à 4 phrases fluides par paragraphe (~40 à 60 mots), l'ensemble doit tenir sur 1 page A4 :
+   - "paragraphPresentAndRequest" : Accroche directe reliant le profil ciblé (${targeted.title}) à la candidature pour "${offer.title}" chez ${offer.company}.
+   - "paragraphExpectationsAndCompany" : Intérêt concret pour ${offer.company} / ses enjeux dans l'annonce et missions que le candidat souhaite prendre en charge.
+   - "paragraphSelfValorization" : Mise en valeur UNIQUEMENT des compétences visées par l'offre ($skillsPrompt) appuyée par l'expérience pertinente${if (certPrompt.isNotBlank()) " et la certification utile" else ""}.
+   - "paragraphInterviewAndCvInvite" : Demande d'entretien concise et invitation naturelle à consulter le CV ci-joint.
+5. "closingFormula" : Formule de politesse complète MLDP.
 
-Candidat Réel :
-Nom : ${profile.fullName}
-Lieu : ${profile.address}
-Titre : ${profile.title}
-Compétences : ${(profile.skills + profile.softSkills).distinct().joinToString(", ")}
-Langues : ${profile.languages.joinToString(", ")}
-Expériences : ${profile.experiences.joinToString("; ") { "${it.title} chez ${it.company} (${it.period}): ${it.description.take(250)}" }}
-Diplômes : ${profile.educations.joinToString("; ") { "${it.degree} (${it.institution}, ${it.year})" }}
-Certifications : ${profile.certifications.joinToString("; ") { "${it.name} (${it.issuer}, ${it.year})" }}
-
-Offre d'emploi ciblée :
+Éléments du CV pré-filtrés pour CETTE offre uniquement :
+- Profil ciblé : ${targeted.title}
+- Compétences retenues pour ce poste : $skillsPrompt
+- Expérience(s) retenue(s) : $expPrompt
+${if (certPrompt.isNotBlank()) "- Certification(s) pertinente(s) : $certPrompt\n" else ""}${if (eduPrompt.isNotBlank() && targeted.educationDirectFit) "- Formation directe pour le poste : $eduPrompt\n" else ""}${if (targeted.languages.isNotEmpty()) "- Langues pertinentes : ${targeted.languages.joinToString(", ")}\n" else ""}
+Offre ciblée :
 Poste : ${offer.title}
 Entreprise : ${offer.company}
 Lieu : ${offer.location}
@@ -290,13 +297,13 @@ Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
                     if (isFr) {
                         "Je vous remercie par avance de l'attention que vous voudriez bien porter à ma candidature et reste à votre disposition pour convenir d'un entretien. Dans cette attente, je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées."
                     } else {
-                        "Thank you in advance for your consideration of my application. I remain at your disposal to arrange an interview and look forward to hearing from you. Sincerely,"
+                        "Thank you in advance for your consideration of my application. I remain at your disposal to arrange an interview and look forward to hearing from you."
                     }
                 },
                 signatureName = profile.fullName.ifBlank { "Candidat" }
             )
         } else {
-            buildDeterministicMldpLetter(offer, profile, offerLangFrench)
+            buildDeterministicMldpLetter(offer, profile, targeted, offerLangFrench)
         }
     }
 
@@ -306,52 +313,73 @@ Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
     private fun buildDeterministicMldpLetter(
         offer: JobOffer,
         profile: UserProfile,
+        targeted: TargetedCvContext,
         isFrench: Boolean
     ): MldpCoverLetterData {
-        val eduText = profile.educations.firstOrNull()?.let { "${it.degree}${if (it.institution.isNotBlank()) " (${it.institution})" else ""}" } ?: ""
-        val expText = profile.experiences.firstOrNull()?.let { "${it.title}${if (it.company.isNotBlank()) " au sein de ${it.company}" else ""}" } ?: ""
-        val expTextEn = profile.experiences.firstOrNull()?.let { "${it.title}${if (it.company.isNotBlank()) " at ${it.company}" else ""}" } ?: ""
-        val skillsText = (profile.skills + profile.softSkills).distinct().take(6).joinToString(", ")
+        val topExp = targeted.experiences.firstOrNull()
+        val skillsText = targeted.skills.take(4).joinToString(", ")
+        val topCert = targeted.certifications.firstOrNull()
+        val edu = targeted.education
 
         val paragraphs = if (isFrench) {
             listOf(
                 buildString {
-                    if (eduText.isNotBlank()) append("Titulaire d'un $eduText")
-                    else append("Professionnel(le) spécialisé(e) en ${profile.title.ifBlank { offer.title }}")
-                    append(", je souhaite vous proposer ma candidature pour le poste de ${offer.title} au sein de ${offer.company}.")
-                },
-                "Votre entreprise reconnue dans son secteur représente pour moi un environnement privilégié où je pourrais exercer pleinement mes missions de coordination et de gestion, tout en contribuant activement au développement opérationnel de vos équipes.",
-                buildString {
-                    if (expText.isNotBlank()) {
-                        append("J'ai pu acquérir, au fil de mon expérience notamment en qualité de $expText, une solide maîtrise en $skillsText. ")
-                    } else if (skillsText.isNotBlank()) {
-                        append("Mon parcours m'a permis de développer des compétences solides en $skillsText. ")
+                    when {
+                        targeted.educationDirectFit && edu != null ->
+                            append("Titulaire d'un ${edu.degree}")
+                        topExp != null ->
+                            append("Fort(e) d'une expérience confirmée en tant que ${topExp.title} chez ${topExp.company}")
+                        else ->
+                            append("Professionnel(le) spécialisé(e) en ${targeted.title.ifBlank { offer.title }}")
                     }
-                    if (profile.languages.isNotEmpty()) {
-                        append("De plus, ma maîtrise des langues (${profile.languages.joinToString(", ")}) constitue un atout concret que je souhaite mettre à la disposition de ${offer.company}.")
+                    append(", je souhaite vous soumettre ma candidature pour le poste de ${offer.title} au sein de ${offer.company}.")
+                },
+                "Votre entreprise reconnue dans son secteur constitue un environnement stimulant où je pourrais m'investir pleinement sur les missions clés du poste, tout en contribuant avec rigueur à l'organisation et aux objectifs de vos équipes.",
+                buildString {
+                    if (topExp != null && skillsText.isNotBlank()) {
+                        append("Mon parcours en qualité de ${topExp.title} chez ${topExp.company} m'a permis de développer une solide maîtrise en $skillsText")
+                    } else if (skillsText.isNotBlank()) {
+                        append("Mes réalisations m'ont permis de consolider des compétences ciblées en $skillsText")
+                    }
+                    if (topCert != null) {
+                        append(", complétée par ma certification en ${topCert.name}")
+                    }
+                    append(".")
+                    if (targeted.languages.isNotEmpty()) {
+                        append(" La maîtrise des langues (${targeted.languages.joinToString(", ")}) viendra également appuyer mes échanges au quotidien.")
                     }
                 }.trim(),
-                "C'est pourquoi je souhaiterais vivement vous rencontrer lors d'un entretien afin de vous exposer plus en détail mes motivations. Je vous invite dès à présent à découvrir ci-joint mon CV, qui retrace mon parcours académique et mes expériences professionnelles."
+                "Je serais ravi(e) de vous rencontrer lors d'un entretien pour échanger sur ma contribution au sein de ${offer.company}. Vous trouverez ci-joint mon CV qui détaille l'ensemble de mon parcours."
             )
         } else {
             listOf(
                 buildString {
-                    if (eduText.isNotBlank()) append("Holding a $eduText")
-                    else append("As an experienced ${profile.title.ifBlank { offer.title }}")
+                    when {
+                        targeted.educationDirectFit && edu != null ->
+                            append("Holding a ${edu.degree}")
+                        topExp != null ->
+                            append("Drawing on my hands-on experience as ${topExp.title} at ${topExp.company}")
+                        else ->
+                            append("As an experienced ${targeted.title.ifBlank { offer.title }}")
+                    }
                     append(", I am eager to apply for the ${offer.title} position at ${offer.company}.")
                 },
-                "${offer.company} stands out as an organization where I can contribute directly to operational excellence while aligning my responsibilities with your team's strategic goals.",
+                "${offer.company} stands out as an organization where I can immediately contribute to your team's objectives while bringing structure, reliability and operational focus to the role.",
                 buildString {
-                    if (expTextEn.isNotBlank()) {
-                        append("Through my role as $expTextEn, I have developed proven expertise in $skillsText. ")
+                    if (topExp != null && skillsText.isNotBlank()) {
+                        append("In my role as ${topExp.title} at ${topExp.company}, I developed proven expertise in $skillsText")
                     } else if (skillsText.isNotBlank()) {
-                        append("Throughout my background, I have built strong capabilities in $skillsText. ")
+                        append("Through my background, I have built strong targeted capabilities in $skillsText")
                     }
-                    if (profile.languages.isNotEmpty()) {
-                        append("In addition, my language proficiency (${profile.languages.joinToString(", ")}) is an asset I look forward to bringing to your team.")
+                    if (topCert != null) {
+                        append(", reinforced by my ${topCert.name} certification")
+                    }
+                    append(".")
+                    if (targeted.languages.isNotEmpty()) {
+                        append(" My language proficiency (${targeted.languages.joinToString(", ")}) further supports smooth cross-team collaboration.")
                     }
                 }.trim(),
-                "I would welcome the opportunity to meet for an interview to discuss my motivation in further detail. Please find my attached CV, which outlines my educational background and professional achievements."
+                "I would welcome the opportunity to discuss how my background aligns with ${offer.company}'s needs in an interview. Please find my attached CV for a complete overview of my track record."
             )
         }
 
@@ -374,6 +402,207 @@ Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
             },
             signatureName = profile.fullName.ifBlank { "Candidat" }
         )
+    }
+
+    private data class TargetedCvContext(
+        val title: String,
+        val skills: List<String>,
+        val experiences: List<ExperienceItem>,
+        val certifications: List<CertificationItem>,
+        val education: EducationItem?,
+        val educationDirectFit: Boolean,
+        val languages: List<String>
+    )
+
+    private fun selectTargetedProfile(offer: JobOffer, profile: UserProfile): TargetedCvContext {
+        val titleTokens = expandedTokens(offer.title)
+        val bodyTokens = expandedTokens("${offer.title} ${offer.description} ${offer.tags.joinToString(" ")}")
+
+        // 1. Pick only the most relevant title segment
+        val titleSegments = profile.title.split("|", "/", "•").map { it.trim() }.filter { it.isNotBlank() }
+        val bestTitle = titleSegments.maxByOrNull { scoreMatch(it, titleTokens, bodyTokens) }
+            ?.takeIf { titleSegments.size <= 1 || scoreMatch(it, titleTokens, bodyTokens) > 0 }
+            ?: titleSegments.firstOrNull()
+            ?: profile.title
+
+        // 2. Score & filter experiences (omit off-domain roles like Teaching for an HR job)
+        val scoredExps = profile.experiences.map { exp ->
+            val expText = "${exp.title} ${exp.description} ${exp.keySkills.joinToString(" ")}"
+            exp to scoreMatch(expText, titleTokens, bodyTokens)
+        }.sortedByDescending { it.second }
+
+        val topExpScore = scoredExps.firstOrNull()?.second ?: 0
+        val relevantExps = when {
+            topExpScore >= 6 -> scoredExps.filter { it.second >= 4 || it.second >= topExpScore / 2 }.take(2).map { it.first }
+            topExpScore > 0 -> scoredExps.filter { it.second > 0 }.take(2).map { it.first }
+            else -> profile.experiences.take(1)
+        }
+
+        // 3. Score & filter skills strictly (suppress irrelevant dev/CAD/teaching tools unless offer matches)
+        val allowTech = bodyTokens.any { it in TECH_MARKERS }
+        val allowDesign = bodyTokens.any { it in DESIGN_MARKERS }
+        val allowTeaching = bodyTokens.any { it in TEACHING_MARKERS }
+
+        val candidateSkills = (profile.skills + profile.softSkills)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { normalizeToken(it) }
+            // Avoid redundant short tokens like "Python" when "Python & Dart" already exists, preferring clean atomic names
+            .filterNot { skill ->
+                val norm = normalizeToken(skill)
+                ((!allowTech && isInMarkerGroup(norm, TECH_MARKERS)) ||
+                    (!allowDesign && isInMarkerGroup(norm, DESIGN_MARKERS)) ||
+                    (!allowTeaching && isInMarkerGroup(norm, TEACHING_MARKERS)))
+            }
+
+        val scoredSkills = candidateSkills.map { skill ->
+            skill to scoreMatch(skill, titleTokens, bodyTokens)
+        }.sortedByDescending { it.second }
+
+        val matchedSkills = scoredSkills.filter { it.second > 0 }.map { it.first }
+        val fallbackExpSkills = relevantExps.flatMap { it.keySkills }
+            .filterNot { skill ->
+                val norm = normalizeToken(skill)
+                (!allowTech && isInMarkerGroup(norm, TECH_MARKERS)) ||
+                    (!allowDesign && isInMarkerGroup(norm, DESIGN_MARKERS)) ||
+                    (!allowTeaching && isInMarkerGroup(norm, TEACHING_MARKERS))
+            }
+
+        val finalSkills = deduplicateSubsumedSkills(
+            if (matchedSkills.size >= 3) matchedSkills.take(5)
+            else (matchedSkills + fallbackExpSkills + scoredSkills.map { it.first }).distinctBy { normalizeToken(it) }.take(5)
+        )
+
+        // 4. Score certifications directly against the offer
+        val relevantCerts = profile.certifications
+            .map { it to scoreMatch("${it.name} ${it.issuer}", titleTokens, bodyTokens) }
+            .filter { it.second > 0 }
+            .sortedByDescending { it.second }
+            .take(2)
+            .map { it.first }
+
+        // 5. Education: drop high school ("Baccalauréat") when higher degree exists, flag direct fit cleanly
+        val nonHighSchool = profile.educations.filterNot { normalizeToken(it.degree).contains("baccalaureat") }
+        val eduPool = nonHighSchool.ifEmpty { profile.educations }
+        val scoredEdus = eduPool.map { it to scoreMatch("${it.degree} ${it.description}", titleTokens, bodyTokens) }
+            .sortedByDescending { it.second }
+        val bestEdu = scoredEdus.firstOrNull()
+        val eduDirectFit = (bestEdu?.second ?: 0) >= 2
+
+        // 6. Include languages ONLY if mentioned in the offer / remote / international scope
+        val mentionsLanguage = bodyTokens.any { it in LANGUAGE_MARKERS } ||
+            offer.regionScope.equals("INTERNATIONAL", ignoreCase = true) ||
+            offer.workMode.equals("REMOTE", ignoreCase = true)
+
+        return TargetedCvContext(
+            title = bestTitle,
+            skills = finalSkills,
+            experiences = relevantExps,
+            certifications = relevantCerts,
+            education = bestEdu?.first,
+            educationDirectFit = eduDirectFit,
+            languages = if (mentionsLanguage) profile.languages else emptyList()
+        )
+    }
+
+    private fun deduplicateSubsumedSkills(skills: List<String>): List<String> {
+        val cleaned = mutableListOf<String>()
+        for (skill in skills) {
+            val norm = normalizeToken(skill)
+            val alreadyCovered = cleaned.any { existing ->
+                val exNorm = normalizeToken(existing)
+                exNorm == norm || (exNorm.contains("/") && exNorm.split("/").any { normalizeToken(it) == norm }) ||
+                    (norm.contains("/") && norm.split("/").any { normalizeToken(it) == exNorm })
+            }
+            if (!alreadyCovered) cleaned.add(skill)
+        }
+        return cleaned
+    }
+
+    private fun scoreMatch(text: String, titleTokens: Set<String>, bodyTokens: Set<String>): Int {
+        val itemTokens = expandedTokens(text)
+        if (itemTokens.isEmpty()) return 0
+        var score = 0
+        for (tok in itemTokens) {
+            if (tok in titleTokens) score += 4
+            else if (tok in bodyTokens) score += 2
+        }
+        return score
+    }
+
+    private fun isInMarkerGroup(normText: String, markers: Set<String>): Boolean {
+        val parts = normText.split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
+        return parts.any { it in markers }
+    }
+
+    private fun expandedTokens(text: String): Set<String> {
+        val base = normalizeToken(text)
+            .split(Regex("[^a-z0-9]+"))
+            .filter { it.length >= 2 && it !in STOP_WORDS }
+            .toMutableSet()
+        for (tok in base.toList()) {
+            SYNONYM_MAP[tok]?.let { base.addAll(it) }
+        }
+        return base
+    }
+
+    private fun normalizeToken(text: String): String {
+        val decomposed = Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD)
+        return decomposed.replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+    }
+
+    companion object {
+        private val STOP_WORDS = setOf(
+            "le", "la", "les", "un", "une", "des", "de", "du", "et", "en", "au", "aux", "pour",
+            "par", "avec", "sur", "dans", "son", "ses", "nous", "vous", "poste", "offre", "chez",
+            "the", "and", "for", "with", "from", "into", "your", "our", "are", "you", "job"
+        )
+
+        private val TECH_MARKERS = setOf(
+            "python", "dart", "flutter", "html", "css", "javascript", "js", "react", "kotlin",
+            "java", "sql", "php", "node", "nodejs", "laravel", "dev", "developpeur", "developer",
+            "fullstack", "backend", "frontend", "mobile", "software", "programmation", "api"
+        )
+
+        private val DESIGN_MARKERS = setOf(
+            "autocad", "fusion", "360", "cad", "cao", "dao", "photoshop", "adobe",
+            "illustrator", "figma", "graphisme", "infographie"
+        )
+
+        private val TEACHING_MARKERS = setOf(
+            "enseignement", "enseignant", "enseignante", "professeur", "educatrice", "educateur",
+            "teacher", "teaching", "classroom", "lesson", "pedagogie", "didactique", "didactics",
+            "eleves", "students", "student", "ecole", "school", "lycee", "formation"
+        )
+
+        private val LANGUAGE_MARKERS = setOf(
+            "francais", "french", "anglais", "english", "arabe", "arabic", "bilingue",
+            "bilingual", "langue", "langues", "language", "languages", "trilingue"
+        )
+
+        private val SYNONYM_MAP: Map<String, Set<String>> = buildMap {
+            val clusters = listOf(
+                setOf("rh", "hr", "ressources", "humaines", "human", "resources"),
+                setOf("paie", "payroll", "salaire", "salaires", "remuneration", "compensation", "cnas", "cacobatph"),
+                setOf("recrutement", "recruitment", "talent", "acquisition", "embauche"),
+                setOf("onboarding", "integration", "accueil"),
+                setOf("attendance", "pointage", "presence", "presences", "conge", "conges", "leave"),
+                setOf("administratif", "administrative", "administration", "gestionnaire", "gestion", "personnel"),
+                setOf("coordination", "coordinateur", "coordinator", "scheduling", "planning", "planification"),
+                setOf("compliance", "conformite", "reglementation", "juridique", "travail"),
+                setOf("reporting", "rapport", "rapports", "analyse", "analysis", "data", "donnees", "excel"),
+                setOf("erp", "odoo", "sap", "sage", "sirh", "hris"),
+                setOf("records", "dossiers", "archives", "archivage", "document", "documents"),
+                setOf("enseignant", "teacher", "teaching", "enseignement", "educatrice", "educateur", "professeur"),
+                setOf("francais", "french"),
+                setOf("anglais", "english"),
+                setOf("comptable", "comptabilite", "accounting", "finance"),
+                setOf("logistique", "logistics", "achats", "procurement", "supply")
+            )
+            clusters.forEach { cluster ->
+                cluster.forEach { term -> put(term, cluster) }
+            }
+        }
     }
 
     private fun looksLikeFrenchOffer(offer: JobOffer): Boolean {

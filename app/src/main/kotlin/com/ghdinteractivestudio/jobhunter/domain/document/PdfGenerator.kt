@@ -106,8 +106,9 @@ object PdfGenerator {
     }
 
     /**
-     * Generates an A4 Cover Letter PDF following the exact 7-part spatial layout of MLDP:
-     * 1. Top-Left Sender | 2. Middle-Right Recipient | 3. Right Place & Date |
+     * Generates an A4 Cover Letter PDF following the exact 7-part spatial layout of MLDP
+     * with Place & Date positioned Top-Right:
+     * 1. Top-Left Sender | 2. Top-Right Place & Date | 3. Middle-Right Recipient |
      * 4. Left Bold Subject & Salutation | 5. Indented Body Paragraphs |
      * 6. Politeness Formula | 7. Right Signature.
      */
@@ -145,9 +146,10 @@ object PdfGenerator {
         val maxContentWidth = PAGE_WIDTH - 2 * MARGIN
         val rightColX = 330f
         val rightColWidth = PAGE_WIDTH - MARGIN - rightColX
+        val headerTopY = MARGIN + 16f
 
-        // 1. Top-Left: Vos noms et coordonnées
-        var leftY = MARGIN + 16f
+        // 1. Haut-Gauche: Vos noms et coordonnées
+        var leftY = headerTopY
         canvas.drawText(letter.senderName, MARGIN, leftY, boldPaint)
         leftY += 15f
         listOfNotNull(
@@ -161,8 +163,16 @@ object PdfGenerator {
             }
         }
 
-        // 2. Middle-Right: Coordonnées du destinataire
-        var rightY = leftY + 8f
+        // 2. Haut-Droite: Lieu et Date tout en haut à droite
+        var dateY = headerTopY
+        wrapText(letter.placeAndDate, regularPaint, rightColWidth).forEach { wLine ->
+            val wWidth = regularPaint.measureText(wLine)
+            canvas.drawText(wLine, PAGE_WIDTH - MARGIN - wWidth, dateY, regularPaint)
+            dateY += 15f
+        }
+
+        // 3. Milieu-Droite: Coordonnées du destinataire sous le bloc supérieur
+        var rightY = maxOf(leftY, dateY + 24f) + 6f
         wrapText(letter.recipientCompany, boldPaint, rightColWidth).forEach { wLine ->
             canvas.drawText(wLine, rightColX, rightY, boldPaint)
             rightY += 15f
@@ -175,13 +185,6 @@ object PdfGenerator {
                 canvas.drawText(wLine, rightColX, rightY, subtlePaint)
                 rightY += 14f
             }
-        }
-
-        // 3. Right: Lieu et Date
-        rightY += 14f
-        wrapText(letter.placeAndDate, regularPaint, rightColWidth).forEach { wLine ->
-            canvas.drawText(wLine, rightColX, rightY, regularPaint)
-            rightY += 15f
         }
 
         // Advance below header blocks

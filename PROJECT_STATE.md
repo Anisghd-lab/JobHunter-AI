@@ -34,9 +34,10 @@ Application Android native (Kotlin + Jetpack Compose Liquid Glass) servant d'age
   - Parsing multi-format : Unix (`Himalayas`, `Arbeitnow`), ISO-8601 (`Emploitic DZ`, `RemoteOK`, `Remotive`), RFC-2822 (`Jobicy`, `WeWorkRemotely`), JSON-LD `validThrough`, marqueurs `"offre expirée"` et phrases FR/EN (`avant le`, `date limite`, `deadline`, `valable X jours`).
   - Purge SQL `purgeExpiredDetectedOffers(...)` + vérification live HTTP 404/410 dans `ApplicationAutomationManager.verifyLiveOfferAndArchiveIfExpired(...)`.
   - Badges d'échéance (`DeadlineParser.formatDaysRemaining(...)`) affichés dans `RadarScreen` et `PipelineScreen` avec verrouillage d'envoi sur offres expirées.
-- [x] **Lettre de Motivation Standard MLDP (`MldpCoverLetter`, `CvTailoringEngine`, `PdfGenerator`, `DocxGenerator`)** :
-  - Modèle structuré en 7 parties : (1) Coordonnées expéditeur haut-gauche, (2) Destinataire droite, (3) Ville & date à droite, (4) `Objet :` gras à gauche + formule d'appel, (5) 4–5 paragraphes avec alinéa (présentation/demande, valorisation entreprise/attentes, valorisation candidat/preuves CV, sollicitation d'entretien + CV ci-joint), (6) Formule de politesse, (7) Signature bas-droite.
-  - Rendu PDF vectoriel deux colonnes + alinéas (`generateMldpCoverLetterPdf`) et Word `.docx` (`generateMldpCoverLetterDocx`).
+- [x] **Lettre de Motivation Standard MLDP Ciblée (`MldpCoverLetter`, `CvTailoringEngine`, `PdfGenerator`, `DocxGenerator`)** :
+  - Mise en page exécutive 7 parties : (1) Coordonnées expéditeur haut-gauche, (2) **Ville & date tout en haut à droite**, (3) Destinataire milieu-droite, (4) `Objet :` gras à gauche + formule d'appel, (5) 4 paragraphes avec alinéa strictement ciblés sur le poste, (6) Formule de politesse, (7) Signature bas-droite.
+  - Filtrage intelligent `selectTargetedProfile(...)` : sélectionne uniquement les compétences, expériences et certifications pertinentes pour l'offre (jamais tout le CV en vrac) + bouton de régénération rapide dans la boîte d'aperçu.
+  - Rendu PDF vectoriel (`generateMldpCoverLetterPdf`) et Word `.docx` OpenXML à tableau sans bordure (`generateMldpCoverLetterDocx`).
 - [x] **Agent Autonome 24/7, Radar Multi-Sources & Envoi Email** :
   - `JobHunterForegroundService` (`DATA_SYNC`), réveil `AlarmManager` sécurisé Android 14+, SMTP STARTTLS/SSL + Gmail OAuth2.
 
@@ -50,7 +51,7 @@ Application Android native (Kotlin + Jetpack Compose Liquid Glass) servant d'age
 ---
 
 ## 4. 📋 Ce qu'il reste à faire
-- [ ] Vérifier compilation `./gradlew assembleDebug` + publication APK sur GitHub Release `v1.0.0` + déploiement ADB sur smartphone dès reconnexion Wireless Debugging.
+- [x] Compilation `./gradlew assembleDebug` + publication APK sur GitHub Release `v1.0.0` + déploiement ADB sur smartphone (`192.168.1.33:46621`).
 
 ---
 

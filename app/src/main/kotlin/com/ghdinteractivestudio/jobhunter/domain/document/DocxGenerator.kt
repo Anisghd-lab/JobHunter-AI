@@ -24,8 +24,9 @@ object DocxGenerator {
 
     /**
      * Generates a formal Word (.docx) Cover Letter strictly formatted after the MLDP standard
-     * (Left Sender -> Right Recipient -> Right Place & Date -> Left Bold Subject & Salutation ->
-     * Indented Body Paragraphs -> Indented Politeness Formula -> Right Signature).
+     * with Place & Date positioned Top-Right:
+     * (Top-Left Sender | Top-Right Place & Date -> Middle-Right Recipient ->
+     * Left Bold Subject & Salutation -> Indented Body Paragraphs -> Politeness Formula -> Right Signature).
      */
     fun generateMldpCoverLetterDocx(
         letter: MldpCoverLetterData,
@@ -33,27 +34,61 @@ object DocxGenerator {
     ) {
         val body = StringBuilder()
 
-        // 1. Vos noms et coordonnées (Gauche)
-        body.append(paragraphXml(letter.senderName, bold = true, sizeHalfPt = 22, align = "left", spaceAfter = 40))
-        listOfNotNull(
-            letter.senderAddress.ifBlank { null },
-            letter.senderPhone.ifBlank { null },
-            letter.senderEmail.ifBlank { null }
-        ).forEach { line ->
-            body.append(paragraphXml(line, bold = false, sizeHalfPt = 20, color = "4B5563", align = "left", spaceAfter = 40))
+        // 1 & 2. Tableau sans bordure : Haut-Gauche (Expéditeur) | Haut-Droite (Lieu et Date)
+        val senderCellParagraphs = buildString {
+            append(paragraphXml(letter.senderName, bold = true, sizeHalfPt = 22, align = "left", spaceAfter = 40))
+            listOfNotNull(
+                letter.senderAddress.ifBlank { null },
+                letter.senderPhone.ifBlank { null },
+                letter.senderEmail.ifBlank { null }
+            ).forEach { line ->
+                append(paragraphXml(line, bold = false, sizeHalfPt = 20, color = "4B5563", align = "left", spaceAfter = 40))
+            }
         }
+        val dateCellParagraphs = paragraphXml(letter.placeAndDate, bold = false, sizeHalfPt = 22, align = "right", spaceAfter = 40)
 
-        // 2. Destinataire (Droite)
-        body.append(paragraphXml(letter.recipientCompany, bold = true, sizeHalfPt = 22, align = "right", spaceBefore = 180, spaceAfter = 40))
+        body.append(
+            """
+            <w:tbl>
+                <w:tblPr>
+                    <w:tblW w:w="9026" w:type="dxa"/>
+                    <w:tblBorders>
+                        <w:top w:val="none" w:sz="0" w:space="0" w:color="auto"/>
+                        <w:left w:val="none" w:sz="0" w:space="0" w:color="auto"/>
+                        <w:bottom w:val="none" w:sz="0" w:space="0" w:color="auto"/>
+                        <w:right w:val="none" w:sz="0" w:space="0" w:color="auto"/>
+                        <w:insideH w:val="none" w:sz="0" w:space="0" w:color="auto"/>
+                        <w:insideV w:val="none" w:sz="0" w:space="0" w:color="auto"/>
+                    </w:tblBorders>
+                </w:tblPr>
+                <w:tblGrid>
+                    <w:gridCol w:w="4513"/>
+                    <w:gridCol w:w="4513"/>
+                </w:tblGrid>
+                <w:tr>
+                    <w:tc>
+                        <w:tcPr><w:tcW w:w="4513" w:type="dxa"/></w:tcPr>
+                        $senderCellParagraphs
+                    </w:tc>
+                    <w:tc>
+                        <w:tcPr><w:tcW w:w="4513" w:type="dxa"/></w:tcPr>
+                        $dateCellParagraphs
+                    </w:tc>
+                </w:tr>
+            </w:tbl>
+            """.trimIndent()
+        )
+
+        // 3. Destinataire (Milieu-Droite sous la date / expéditeur)
+        body.append(paragraphXml(letter.recipientCompany, bold = true, sizeHalfPt = 22, align = "left", leftIndent = 5000, spaceBefore = 200, spaceAfter = 40))
         if (letter.recipientAttention.isNotBlank()) {
-            body.append(paragraphXml(letter.recipientAttention, bold = false, sizeHalfPt = 20, color = "4B5563", align = "right", spaceAfter = 40))
+            body.append(paragraphXml(letter.recipientAttention, bold = false, sizeHalfPt = 20, color = "4B5563", align = "left", leftIndent = 5000, spaceAfter = 40))
         }
         if (letter.recipientLocation.isNotBlank()) {
-            body.append(paragraphXml(letter.recipientLocation, bold = false, sizeHalfPt = 20, color = "4B5563", align = "right", spaceAfter = 80))
+            body.append(paragraphXml(letter.recipientLocation, bold = false, sizeHalfPt = 20, color = "4B5563", align = "left", leftIndent = 5000, spaceAfter = 220))
+        } else {
+            body.append(paragraphXml("", sizeHalfPt = 20, spaceAfter = 120))
         }
-
-        // 3. Lieu et Date (Droite)
-        body.append(paragraphXml(letter.placeAndDate, bold = false, sizeHalfPt = 22, align = "right", spaceBefore = 120, spaceAfter = 240))
 
         // 4. Objet & Formule d'appel (Gauche)
         body.append(paragraphXml(letter.subject, bold = true, sizeHalfPt = 22, align = "left", spaceBefore = 80, spaceAfter = 200))
@@ -147,11 +182,16 @@ object DocxGenerator {
         sizeHalfPt: Int = 22,
         color: String = "1F2937",
         align: String = "left",
+        leftIndent: Int = 0,
         firstLineIndent: Int = 0,
         spaceBefore: Int = 0,
         spaceAfter: Int = 120
     ): String {
-        val indTag = if (firstLineIndent > 0) """<w:ind w:firstLine="$firstLineIndent"/>""" else ""
+        val indAttrs = buildString {
+            if (leftIndent > 0) append(""" w:left="$leftIndent"""")
+            if (firstLineIndent > 0) append(""" w:firstLine="$firstLineIndent"""")
+        }
+        val indTag = if (indAttrs.isNotEmpty()) "<w:ind$indAttrs/>" else ""
         val boldTag = if (bold) "<w:b/>" else ""
         return """
             <w:p>
