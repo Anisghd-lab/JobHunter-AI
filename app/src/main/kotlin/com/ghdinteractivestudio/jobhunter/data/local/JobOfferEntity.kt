@@ -39,7 +39,10 @@ data class JobOfferEntity(
     val appliedChannel: String = "",
     val publishedAt: Long = 0L,
     val deadlineAt: Long = 0L,
-    val deadlineLabel: String = ""
+    val deadlineLabel: String = "",
+    val followUpCount: Int = 0,
+    val lastFollowUpAt: Long = 0L,
+    val lastReplySummary: String = ""
 ) {
     fun toDomain(): JobOffer = JobOffer(
         id = id,
@@ -73,7 +76,10 @@ data class JobOfferEntity(
         appliedChannel = appliedChannel,
         publishedAt = publishedAt,
         deadlineAt = deadlineAt,
-        deadlineLabel = deadlineLabel
+        deadlineLabel = deadlineLabel,
+        followUpCount = followUpCount,
+        lastFollowUpAt = lastFollowUpAt,
+        lastReplySummary = lastReplySummary
     )
 
     companion object {
@@ -109,7 +115,10 @@ data class JobOfferEntity(
             appliedChannel = offer.appliedChannel,
             publishedAt = offer.publishedAt,
             deadlineAt = offer.deadlineAt,
-            deadlineLabel = offer.deadlineLabel
+            deadlineLabel = offer.deadlineLabel,
+            followUpCount = offer.followUpCount,
+            lastFollowUpAt = offer.lastFollowUpAt,
+            lastReplySummary = offer.lastReplySummary
         )
     }
 }

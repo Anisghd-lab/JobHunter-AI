@@ -59,10 +59,14 @@ import com.ghdinteractivestudio.jobhunter.data.local.FreeLlmCatalog
 import com.ghdinteractivestudio.jobhunter.data.local.FreeLlmProvider
 import com.ghdinteractivestudio.jobhunter.data.local.SettingsRepository
 import com.ghdinteractivestudio.jobhunter.domain.ai.LlmClient
+import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomationManager
+import com.ghdinteractivestudio.jobhunter.domain.email.EmailDispatcher
 import com.ghdinteractivestudio.jobhunter.service.JobHunterForegroundService
-import com.ghdinteractivestudio.jobhunter.ui.components.GlassStyle
-import com.ghdinteractivestudio.jobhunter.ui.components.glass
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassFilterChip
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassSoftButton
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassSolidButton
 import com.ghdinteractivestudio.jobhunter.ui.components.glassCard
+import com.ghdinteractivestudio.jobhunter.ui.components.glassFieldColors
 import com.ghdinteractivestudio.jobhunter.ui.theme.Capsule
 import com.ghdinteractivestudio.jobhunter.ui.theme.LocalDark
 import com.ghdinteractivestudio.jobhunter.ui.theme.Palette
@@ -86,11 +90,12 @@ fun AgentScreen(
 
     var testResultMsg by remember { mutableStateOf<String?>(null) }
     var isTestingAi by remember { mutableStateOf(false) }
+    var emailTestMsg by remember { mutableStateOf<String?>(null) }
+    var isTestingEmail by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Palette.background)
             .padding(horizontal = 16.dp)
             .verticalScroll(rememberScrollState())
     ) {
@@ -182,20 +187,12 @@ fun AgentScreen(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(60, 70, 80).forEach { threshold ->
-                        val active = settings.autoApplyMinScore == threshold
-                        Box(
-                            modifier = Modifier
-                                .background(if (active) Palette.electricBlue else Color.Transparent, Capsule())
-                                .border(0.75.dp, if (active) Palette.electricBlue else Palette.tertiary.copy(alpha = 0.4f), Capsule())
-                                .clickable { settingsRepo.update { it.copy(autoApplyMinScore = threshold) } }
-                                .padding(horizontal = 12.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                text = "Seuil $threshold%",
-                                style = Type.label.bold,
-                                color = if (active) Color.White else Palette.secondary
-                            )
-                        }
+                        GlassFilterChip(
+                            text = "Seuil $threshold%",
+                            selected = settings.autoApplyMinScore == threshold,
+                            selectedColor = Palette.blueSolidBg,
+                            onClick = { settingsRepo.update { it.copy(autoApplyMinScore = threshold) } }
+                        )
                     }
                 }
 
@@ -234,7 +231,10 @@ fun AgentScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                Button(
+                GlassSoftButton(
+                    text = "Exempter batterie (24/7)",
+                    icon = Icons.Default.BatteryAlert,
+                    accentColor = Palette.electricBlue,
                     onClick = {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -254,17 +254,8 @@ fun AgentScreen(
                             }
                         }
                     },
-                    shape = Capsule(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.electricBlue.copy(alpha = 0.15f),
-                        contentColor = Palette.electricBlue
-                    ),
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(imageVector = Icons.Default.BatteryAlert, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(text = "Exempter l'app d'optimisation batterie (24/7)", style = Type.bodySmall.semibold)
-                }
+                )
             }
         }
 
@@ -318,32 +309,16 @@ fun AgentScreen(
                     FreeLlmProvider.entries.forEach { provider ->
                         val isSelected = settings.activeProvider == provider
                         val hasKey = settings.apiKeyFor(provider).isNotBlank()
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    if (isSelected) Palette.emeraldAccent else Color.Transparent,
-                                    Capsule()
-                                )
-                                .glass(Capsule(), style = GlassStyle.Clear)
-                                .border(
-                                    0.75.dp,
-                                    if (isSelected) Palette.emeraldAccent else if (hasKey) Palette.emeraldAccent.copy(alpha = 0.5f) else Palette.tertiary.copy(alpha = 0.35f),
-                                    Capsule()
-                                )
-                                .clickable {
-                                    val defaultModel = FreeLlmCatalog.modelsFor(provider).firstOrNull()?.id ?: ""
-                                    settingsRepo.update {
-                                        it.copy(activeProvider = provider, activeModel = defaultModel)
-                                    }
+                        GlassFilterChip(
+                            text = if (hasKey) "✓ ${provider.displayName}" else provider.displayName,
+                            selected = isSelected,
+                            onClick = {
+                                val defaultModel = FreeLlmCatalog.modelsFor(provider).firstOrNull()?.id ?: ""
+                                settingsRepo.update {
+                                    it.copy(activeProvider = provider, activeModel = defaultModel)
                                 }
-                                .padding(horizontal = 12.dp, vertical = 7.dp)
-                        ) {
-                            Text(
-                                text = if (hasKey) "✓ ${provider.displayName}" else provider.displayName,
-                                style = Type.label.bold,
-                                color = if (isSelected) Color.White else Palette.text
-                            )
-                        }
+                            }
+                        )
                     }
                 }
 
@@ -361,27 +336,12 @@ fun AgentScreen(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     FreeLlmCatalog.modelsFor(settings.activeProvider).forEach { opt ->
-                        val selected = settings.activeModel == opt.id
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    if (selected) Palette.electricBlue.copy(alpha = 0.25f) else Color.Transparent,
-                                    Capsule()
-                                )
-                                .border(
-                                    0.75.dp,
-                                    if (selected) Palette.electricBlue else Palette.tertiary.copy(alpha = 0.3f),
-                                    Capsule()
-                                )
-                                .clickable { settingsRepo.update { it.copy(activeModel = opt.id) } }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                text = opt.label,
-                                style = Type.label.bold,
-                                color = if (selected) Palette.electricBlue else Palette.secondary
-                            )
-                        }
+                        GlassFilterChip(
+                            text = opt.label,
+                            selected = settings.activeModel == opt.id,
+                            selectedColor = Palette.blueSolidBg,
+                            onClick = { settingsRepo.update { it.copy(activeModel = opt.id) } }
+                        )
                     }
                 }
 
@@ -395,6 +355,7 @@ fun AgentScreen(
                         onValueChange = { v -> settingsRepo.update { it.copy(ollamaUrl = v) } },
                         label = { Text("URL Ollama Locale") },
                         singleLine = true,
+                        colors = glassFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
                 } else {
@@ -422,6 +383,7 @@ fun AgentScreen(
                         },
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true,
+                        colors = glassFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -429,7 +391,11 @@ fun AgentScreen(
                 Spacer(Modifier.height(10.dp))
 
                 // Live AI Test Button
-                Button(
+                GlassSolidButton(
+                    text = if (isTestingAi) "Test IA en cours..." else "Tester l'IA Gratuite",
+                    icon = Icons.Default.AutoAwesome,
+                    containerColor = Palette.emeraldSolidBg,
+                    isLoading = isTestingAi,
                     onClick = {
                         isTestingAi = true
                         testResultMsg = null
@@ -445,24 +411,8 @@ fun AgentScreen(
                             isTestingAi = false
                         }
                     },
-                    enabled = !isTestingAi,
-                    shape = Capsule(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.emeraldAccent,
-                        contentColor = Color.White
-                    ),
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isTestingAi) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Test du modèle gratuit...", style = Type.label.bold)
-                    } else {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Tester la connexion IA Gratuite", style = Type.label.bold)
-                    }
-                }
+                )
 
                 if (testResultMsg != null) {
                     Spacer(Modifier.height(8.dp))
@@ -475,7 +425,7 @@ fun AgentScreen(
                         Text(
                             text = testResultMsg ?: "",
                             style = Type.label.monospaced,
-                            color = if (testResultMsg!!.startsWith("✓")) Palette.emeraldAccent else Color(0xFFF87171)
+                            color = if (testResultMsg!!.startsWith("✓")) Palette.emeraldAccent else Palette.danger
                         )
                     }
                 }
@@ -523,7 +473,7 @@ fun AgentScreen(
                     onCheckedChange = { darkMode -> settingsRepo.update { it.copy(isDarkTheme = darkMode) } },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
-                        checkedTrackColor = Palette.emeraldAccent
+                        checkedTrackColor = Palette.emeraldSolidBg
                     )
                 )
             }
@@ -563,16 +513,12 @@ fun AgentScreen(
                         Triple("Gmail", "smtp.gmail.com", 465),
                         Triple("Outlook", "smtp-mail.outlook.com", 587)
                     ).forEach { (label, host, port) ->
-                        val active = settings.smtpHost == host
-                        Box(
-                            modifier = Modifier
-                                .background(if (active) Palette.electricBlue.copy(alpha = 0.2f) else Color.Transparent, Capsule())
-                                .border(0.75.dp, if (active) Palette.electricBlue else Palette.tertiary.copy(alpha = 0.35f), Capsule())
-                                .clickable { settingsRepo.update { it.copy(smtpHost = host, smtpPort = port) } }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
-                            Text(text = label, style = Type.label.bold, color = if (active) Palette.electricBlue else Palette.secondary)
-                        }
+                        GlassFilterChip(
+                            text = label,
+                            selected = settings.smtpHost == host,
+                            selectedColor = Palette.blueSolidBg,
+                            onClick = { settingsRepo.update { it.copy(smtpHost = host, smtpPort = port) } }
+                        )
                     }
                 }
 
@@ -583,6 +529,7 @@ fun AgentScreen(
                     onValueChange = { v -> settingsRepo.update { it.copy(senderEmail = v) } },
                     label = { Text("Votre adresse email (ex: nom@yahoo.com)") },
                     singleLine = true,
+                    colors = glassFieldColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -591,8 +538,9 @@ fun AgentScreen(
                 OutlinedTextField(
                     value = settings.smtpHost,
                     onValueChange = { v -> settingsRepo.update { it.copy(smtpHost = v) } },
-                    label = { Text("Serveur SMTP (port ${settings.smtpPort})") },
+                    label = { Text("Serveur SMTP (auto 465/587)") },
                     singleLine = true,
+                    colors = glassFieldColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -604,15 +552,128 @@ fun AgentScreen(
                     label = { Text("Mot de passe d'application (App Password)") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
+                    colors = glassFieldColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(Modifier.height(8.dp))
+
+                // Total AI Control switches (Auto Send + IMAP Reply & Follow-up)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Contrôle IA Total (Envoi + IMAP)",
+                            style = Type.bodySmall.bold,
+                            color = Palette.text
+                        )
+                        Text(
+                            text = "L'IA envoie directement via SMTP et lit les réponses recruteurs (IMAP 993).",
+                            style = Type.label,
+                            color = Palette.secondary
+                        )
+                    }
+                    Switch(
+                        checked = settings.aiAutonomousEmailControl,
+                        onCheckedChange = { enabled ->
+                            settingsRepo.update { it.copy(aiAutonomousEmailControl = enabled) }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Palette.emeraldSolidBg
+                        )
+                    )
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Relance Automatique IA (J+${settings.followUpDelayDays})",
+                            style = Type.bodySmall.bold,
+                            color = Palette.text
+                        )
+                        Text(
+                            text = "Relance polie automatique après ${settings.followUpDelayDays} jours sans réponse.",
+                            style = Type.label,
+                            color = Palette.secondary
+                        )
+                    }
+                    Switch(
+                        checked = settings.autoFollowUpEnabled,
+                        onCheckedChange = { enabled ->
+                            settingsRepo.update { it.copy(autoFollowUpEnabled = enabled) }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Palette.blueSolidBg
+                        )
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                // Live SMTP / Auth Test Button
+                GlassSolidButton(
+                    text = if (isTestingEmail) "Test connexion Email..." else "Tester Connexion Email",
+                    icon = Icons.Default.CheckCircle,
+                    containerColor = Palette.blueSolidBg,
+                    isLoading = isTestingEmail,
+                    onClick = {
+                        isTestingEmail = true
+                        emailTestMsg = null
+                        coroutineScope.launch {
+                            val disp = EmailDispatcher(ApplicationAutomationManager.buildEmailConfig(settings))
+                            val smtpRes = disp.testSmtpConnection()
+                            val imapRes = if (smtpRes.isSuccess && settings.smtpPassword.isNotBlank()) {
+                                disp.fetchRecentInboxReplies(maxMessages = 3)
+                            } else null
+                            emailTestMsg = smtpRes.fold(
+                                onSuccess = { msg ->
+                                    val imapInfo = imapRes?.fold(
+                                        onSuccess = { " · IMAP OK (${it.size} réc.)" },
+                                        onFailure = { " · IMAP: ${it.message?.take(35)}" }
+                                    ) ?: ""
+                                    "$msg$imapInfo"
+                                },
+                                onFailure = { "✗ ${it.message}" }
+                            )
+                            isTestingEmail = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (emailTestMsg != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Palette.plateBackground, RoundedRectangle(8.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = emailTestMsg ?: "",
+                            style = Type.label.monospaced,
+                            color = if (emailTestMsg!!.contains("✓")) Palette.emeraldAccent else Palette.danger
+                        )
+                    }
+                }
 
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = if (settings.hasEmailCredentials()) {
-                        "✓ Envoi automatique activé en arrière-plan."
+                        "✓ Identifiants configurés : envoi direct & suivi autonome prêts."
                     } else {
-                        "Optionnel : sans mot de passe d'application, l'app prépare votre Email avec pièces jointes et ouvre Yahoo Mail / Gmail prêt à envoyer."
+                        "Astuce Yahoo/Gmail : créez un « Mot de passe d'application » (16 caractères, espaces gérés auto) dans Sécurité du compte pour autoriser l'envoi + suivi 100 % autonome."
                     },
                     style = Type.label,
                     color = if (settings.hasEmailCredentials()) Palette.emeraldAccent else Palette.secondary

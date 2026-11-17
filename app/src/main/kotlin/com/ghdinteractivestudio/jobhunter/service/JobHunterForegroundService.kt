@@ -115,7 +115,7 @@ class JobHunterForegroundService : Service() {
 
                     // Autonomous AI comparison + MLDP Cover Letter & Application Automation when CV is loaded
                     var autoProcessedCount = 0
-                    if (newOffers.isNotEmpty() && profile != null && profile.rawCvContent.isNotBlank() && settings.hasAnyAiKey()) {
+                    if (newOffers.isNotEmpty() && profile != null && profile.combinedSearchCorpus().isNotBlank() && settings.hasAnyAiKey()) {
                         val candidates = newOffers.filter { !DeadlineParser.isExpiredOrStale(it) }.take(3)
                         for (candidate in candidates) {
                             val existing = dao.getOfferById(candidate.id)
@@ -147,13 +147,24 @@ class JobHunterForegroundService : Service() {
                         }
                     }
 
-                    if (newOffers.isNotEmpty()) {
-                        val msg = if (autoProcessedCount > 0) {
-                            "${newOffers.size} offres actives · $autoProcessedCount dossier(s) automatisé(s)"
-                        } else {
-                            "${newOffers.size} offres actives (DZ & Monde) · Délais vérifiés"
+                    // Autonomous IMAP Reply Detection + AI J+N Follow-Up Cycle
+                    var followUpSummary = ""
+                    if (profile != null && settings.aiAutonomousEmailControl && settings.hasEmailCredentials()) {
+                        val (followUpdates, summary) = ApplicationAutomationManager.runAutonomousEmailFollowUpCycle(
+                            context = applicationContext,
+                            profile = profile,
+                            settings = settings
+                        )
+                        if (followUpdates > 0) followUpSummary = summary
+                    }
+
+                    if (newOffers.isNotEmpty() || followUpSummary.isNotBlank()) {
+                        val msg = when {
+                            followUpSummary.isNotBlank() -> followUpSummary.take(120)
+                            autoProcessedCount > 0 -> "${newOffers.size} offres actives · $autoProcessedCount candidature(s) auto"
+                            else -> "${newOffers.size} offres actives (DZ, Golfe & Monde)"
                         }
-                        updateNotification("Veille 24/7 Active", msg)
+                        updateNotification("Veille & Suivi IA 24/7 Actifs", msg)
                     }
                 }.onFailure { err ->
                     Log.e(TAG, "Hunting loop error: ${err.message}", err)

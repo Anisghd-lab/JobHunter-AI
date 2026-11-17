@@ -80,6 +80,29 @@ object DeadlineParser {
                 if (date != null) return date.time
             }
         }
+
+        // Relative posting timestamps (e.g. "Just now", "Today", "3 hours ago", "2 days ago", "il y a 4 jours")
+        val lower = trimmed.lowercase(Locale.ROOT)
+        val now = System.currentTimeMillis()
+        when {
+            lower == "today" || lower == "just now" || lower == "aujourd'hui" -> return now
+            lower == "yesterday" || lower == "hier" -> return now - ONE_DAY_MS
+        }
+        Regex("""(\d+)\s*(minute|min|hour|hr|heure|day|jour|week|semaine|month|mois)s?""", RegexOption.IGNORE_CASE)
+            .find(lower)?.let { m ->
+                val count = m.groupValues[1].toLongOrNull() ?: return 0L
+                val unit = m.groupValues[2]
+                val deltaMs = when {
+                    unit.startsWith("min") -> count * 60_000L
+                    unit.startsWith("h") -> count * 3_600_000L
+                    unit.startsWith("d") || unit.startsWith("j") -> count * ONE_DAY_MS
+                    unit.startsWith("w") || unit.startsWith("s") -> count * 7L * ONE_DAY_MS
+                    unit.startsWith("m") -> count * 30L * ONE_DAY_MS
+                    else -> 0L
+                }
+                if (deltaMs > 0L) return now - deltaMs
+            }
+
         return 0L
     }
 

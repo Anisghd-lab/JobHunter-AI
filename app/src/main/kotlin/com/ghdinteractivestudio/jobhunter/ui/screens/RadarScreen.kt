@@ -69,9 +69,13 @@ import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
 import com.ghdinteractivestudio.jobhunter.domain.model.DocumentFormatRequirement
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
 import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassFilterChip
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassSoftButton
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassSolidButton
 import com.ghdinteractivestudio.jobhunter.ui.components.GlassStyle
 import com.ghdinteractivestudio.jobhunter.ui.components.glass
 import com.ghdinteractivestudio.jobhunter.ui.components.glassCard
+import com.ghdinteractivestudio.jobhunter.ui.components.glassFieldColors
 import com.ghdinteractivestudio.jobhunter.ui.theme.Capsule
 import com.ghdinteractivestudio.jobhunter.ui.theme.LocalDark
 import com.ghdinteractivestudio.jobhunter.ui.theme.Palette
@@ -113,6 +117,7 @@ fun RadarScreen(
         offers.filter { offer ->
             val matchesFilter = when (selectedFilter) {
                 "ALGERIA" -> offer.regionScope == "ALGERIA"
+                "GULF" -> offer.regionScope == "GULF"
                 "INTERNATIONAL" -> offer.regionScope == "INTERNATIONAL"
                 "REMOTE" -> offer.isRemote || offer.workMode == "REMOTE"
                 "ONSITE" -> !offer.isRemote || offer.workMode == "ONSITE" || offer.workMode == "HYBRID"
@@ -129,12 +134,12 @@ fun RadarScreen(
     }
 
     val dzCount = offers.count { it.regionScope == "ALGERIA" }
+    val gulfCount = offers.count { it.regionScope == "GULF" }
     val intlCount = offers.count { it.regionScope == "INTERNATIONAL" }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Palette.background)
             .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(16.dp))
@@ -152,7 +157,7 @@ fun RadarScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                         Icon(
                             imageVector = Icons.Default.Bolt,
                             contentDescription = null,
@@ -163,42 +168,25 @@ fun RadarScreen(
                         Text(
                             text = "RADAR WEB 100% RÉEL",
                             style = Type.mono.bold,
-                            color = Palette.emeraldAccent
+                            color = Palette.emeraldAccent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    Button(
-                        onClick = onRefreshScanClick,
-                        enabled = !isScanning,
-                        shape = Capsule(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Palette.electricBlue,
-                            contentColor = Color.White
-                        )
-                    ) {
-                        if (isScanning) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                modifier = Modifier.size(14.dp),
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(text = "Scan...", style = Type.label.bold)
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = null,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(text = "Scanner", style = Type.label.bold)
-                        }
-                    }
+                    GlassSolidButton(
+                        text = if (isScanning) "Scan..." else "Scanner",
+                        icon = Icons.Default.Refresh,
+                        containerColor = Palette.blueSolidBg,
+                        isLoading = isScanning,
+                        height = 36.dp,
+                        onClick = onRefreshScanClick
+                    )
                 }
 
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "${offers.size} offres réelles en direct (🇩🇿 Algérie: $dzCount · 🌍 International: $intlCount). Zéro donnée fictive.",
+                    text = "${offers.size} offres actives · 🇩🇿 Algérie: $dzCount · 🏜️ Golfe: $gulfCount · 🌍 Monde: $intlCount",
                     style = Type.label,
                     color = Palette.secondary
                 )
@@ -208,10 +196,11 @@ fun RadarScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Filtrer par poste, compétence, wilaya, pays...", style = Type.label) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    placeholder = { Text("Filtrer poste, compétence, Golfe, wilaya...", style = Type.label) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Palette.secondary, modifier = Modifier.size(18.dp)) },
                     singleLine = true,
                     shape = Capsule(),
+                    colors = glassFieldColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -219,7 +208,7 @@ fun RadarScreen(
 
         Spacer(Modifier.height(10.dp))
 
-        // Filter Chips Bar (Algeria vs International, Remote vs Présentiel)
+        // Filter Chips Bar (Tout, Algérie, Golfe GCC, Monde, Présentiel, Remote)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -229,32 +218,16 @@ fun RadarScreen(
             listOf(
                 "ALL" to "Tout (${offers.size})",
                 "ALGERIA" to "🇩🇿 Algérie ($dzCount)",
+                "GULF" to "🏜️ Golfe ($gulfCount)",
                 "INTERNATIONAL" to "🌍 Monde ($intlCount)",
                 "ONSITE" to "🏢 Présentiel",
                 "REMOTE" to "🏠 Remote"
             ).forEach { (key, label) ->
-                val selected = selectedFilter == key
-                Box(
-                    modifier = Modifier
-                        .background(
-                            if (selected) Palette.emeraldAccent else Color.Transparent,
-                            Capsule()
-                        )
-                        .glass(Capsule(), style = GlassStyle.Clear)
-                        .border(
-                            0.75.dp,
-                            if (selected) Palette.emeraldAccent else Palette.tertiary.copy(alpha = 0.35f),
-                            Capsule()
-                        )
-                        .clickable { selectedFilter = key }
-                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                ) {
-                    Text(
-                        text = label,
-                        style = Type.label.bold,
-                        color = if (selected) Color.White else Palette.text
-                    )
-                }
+                GlassFilterChip(
+                    text = label,
+                    selected = selectedFilter == key,
+                    onClick = { selectedFilter = key }
+                )
             }
         }
 
@@ -365,7 +338,11 @@ fun JobOfferCard(
                         )
                     }
 
-                    val regionColor = if (offer.regionScope == "ALGERIA") Palette.emeraldAccent else Palette.attention
+                    val regionColor = when (offer.regionScope) {
+                        "ALGERIA" -> Palette.emeraldAccent
+                        "GULF" -> Palette.cyanNeon
+                        else -> Palette.attention
+                    }
                     Box(
                         modifier = Modifier
                             .background(regionColor.copy(alpha = 0.14f), Capsule())
@@ -373,10 +350,10 @@ fun JobOfferCard(
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = if (offer.regionScope == "ALGERIA") {
-                                if (offer.isRemote) "🇩🇿 DZ • Remote" else "🇩🇿 DZ • Présentiel"
-                            } else {
-                                if (offer.isRemote) "🌍 Remote" else "🌍 Présentiel"
+                            text = when (offer.regionScope) {
+                                "ALGERIA" -> if (offer.isRemote) "🇩🇿 DZ • Remote" else "🇩🇿 DZ • Présentiel"
+                                "GULF" -> if (offer.isRemote) "🏜️ Golfe • Remote" else "🏜️ Golfe • Présentiel"
+                                else -> if (offer.isRemote) "🌍 Remote" else "🌍 Présentiel"
                             },
                             style = Type.label.bold,
                             color = regionColor
@@ -599,47 +576,29 @@ fun JobOfferCard(
 
             Spacer(Modifier.height(8.dp))
 
-            // Actions Row
+            // Uniform Action Buttons Row (equal size, single-line, zero overflow)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
+                GlassSoftButton(
+                    text = "Analyser IA",
+                    icon = Icons.Default.AutoAwesome,
+                    accentColor = Palette.electricBlue,
+                    enabled = !isBusy,
                     onClick = onAnalyzeClick,
-                    enabled = !isBusy,
-                    shape = Capsule(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.electricBlue.copy(alpha = 0.2f),
-                        contentColor = Palette.electricBlue
-                    ),
                     modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(text = "Comparer IA", style = Type.label.bold)
-                }
+                )
 
-                Button(
-                    onClick = onApplyClick,
+                GlassSolidButton(
+                    text = if (offer.recruiterEmail.isNotBlank()) "Postuler Auto" else "Postuler",
+                    icon = Icons.AutoMirrored.Filled.Send,
+                    containerColor = Palette.emeraldSolidBg,
                     enabled = !isBusy,
-                    shape = Capsule(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.emeraldAccent,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier.weight(1.1f)
-                ) {
-                    if (isBusy) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(15.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = if (offer.recruiterEmail.isNotBlank()) "Postuler Email" else "Postuler / Préparer",
-                            style = Type.label.bold
-                        )
-                    }
-                }
+                    isLoading = isBusy,
+                    onClick = onApplyClick,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
@@ -660,7 +619,7 @@ fun ApplyAssistantDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = if (dark) Color(0xFF131823) else Color.White,
+        containerColor = if (dark) Color(0xFF131823) else Color(0xFFF3F7FC),
         title = {
             Text(
                 text = if (outcome.sentSilentlyByEmail) "Candidature Envoyée !" else "Dossier Prêt (${offer.requiredFormat.name})",
@@ -684,41 +643,37 @@ fun ApplyAssistantDialog(
 
                 Spacer(Modifier.height(10.dp))
 
-                // Files generated
+                // Uniform File Buttons Row
                 val usingOriginal = outcome.usesOriginalCv || offer.tailoredCvPath.contains("_Original_")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     if (offer.tailoredCvPath.isNotBlank()) {
-                        Button(
+                        GlassSoftButton(
+                            text = if (usingOriginal) "CV Original" else "CV Modifié",
+                            icon = Icons.Default.Description,
+                            accentColor = Palette.electricBlue,
+                            height = 40.dp,
                             onClick = {
                                 val intent = ApplicationAutomationManager.buildViewOrShareFileIntent(context, offer.tailoredCvPath, share = false)
                                 if (intent != null) runCatching { context.startActivity(Intent.createChooser(intent, "Ouvrir CV")) }
                             },
-                            shape = Capsule(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Palette.electricBlue.copy(alpha = 0.2f), contentColor = Palette.electricBlue),
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                text = if (usingOriginal) "CV Original" else "CV Modifié (${File(offer.tailoredCvPath).extension.uppercase()})",
-                                style = Type.label.bold
-                            )
-                        }
+                        )
                     }
                     if (offer.letterPath.isNotBlank()) {
-                        Button(
+                        GlassSoftButton(
+                            text = "Lettre ${File(offer.letterPath).extension.uppercase()}",
+                            icon = Icons.Default.Description,
+                            accentColor = Palette.emeraldAccent,
+                            height = 40.dp,
                             onClick = {
                                 val intent = ApplicationAutomationManager.buildViewOrShareFileIntent(context, offer.letterPath, share = false)
                                 if (intent != null) runCatching { context.startActivity(Intent.createChooser(intent, "Ouvrir Lettre")) }
                             },
-                            shape = Capsule(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent.copy(alpha = 0.2f), contentColor = Palette.emeraldAccent),
                             modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Lettre ${File(offer.letterPath).extension.uppercase()}", style = Type.label.bold)
-                        }
+                        )
                     }
                 }
 
@@ -792,55 +747,48 @@ fun ApplyAssistantDialog(
                 Spacer(Modifier.height(12.dp))
 
                 if (offer.recruiterEmail.isNotBlank() && !outcome.sentSilentlyByEmail) {
-                    Button(
+                    GlassSolidButton(
+                        text = "Envoyer Email (${offer.recruiterEmail})",
+                        icon = Icons.Default.Email,
+                        containerColor = Palette.blueSolidBg,
                         onClick = {
                             val intent = ApplicationAutomationManager.buildEmailComposeIntent(context, offer)
                             runCatching { context.startActivity(Intent.createChooser(intent, "Envoyer par Email")) }
                         },
-                        shape = Capsule(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Palette.electricBlue, contentColor = Color.White),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Envoyer via Appli Email (${offer.recruiterEmail})", style = Type.label.bold)
-                    }
-                    Spacer(Modifier.height(6.dp))
+                    )
+                    Spacer(Modifier.height(8.dp))
                 }
 
                 if (offer.url.startsWith("http")) {
-                    Button(
+                    GlassSolidButton(
+                        text = "Ouvrir l'offre Web ↗",
+                        icon = Icons.Default.OpenInBrowser,
+                        containerColor = Palette.emeraldSolidBg,
                         onClick = {
                             val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             cb.setPrimaryClip(ClipData.newPlainText("Lettre", offer.generatedLetter))
                             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(offer.url))) }
                         },
-                        shape = Capsule(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent, contentColor = Color.White),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Ouvrir l'offre sur le Web ↗ (Lettre copiée)", style = Type.label.bold)
-                    }
+                    )
                 }
             }
         },
         confirmButton = {
             if (!outcome.sentSilentlyByEmail) {
-                Button(
-                    onClick = onMarkApplied,
-                    colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent, contentColor = Color.White)
-                ) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Marquer Postulé ✓", style = Type.label.bold)
-                }
+                GlassSolidButton(
+                    text = "Postulé ✓",
+                    icon = Icons.Default.CheckCircle,
+                    containerColor = Palette.emeraldSolidBg,
+                    height = 38.dp,
+                    onClick = onMarkApplied
+                )
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Fermer", color = Palette.secondary)
+                Text("Fermer", style = Type.label.bold, color = Palette.secondary)
             }
         }
     )

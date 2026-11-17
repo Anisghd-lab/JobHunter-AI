@@ -78,8 +78,8 @@ fun GlassTabBar(
             .padding(4.dp)
     ) {
         val pillShape = Capsule()
-        val pillBg = if (dark) Palette.emeraldAccent.copy(alpha = 0.16f) else Palette.text.copy(alpha = 0.08f)
-        val pillBorder = if (dark) Palette.emeraldAccent.copy(alpha = 0.35f) else Palette.glassBorder
+        val pillBg = if (dark) Palette.emeraldAccent.copy(alpha = 0.18f) else Palette.emeraldAccent.copy(alpha = 0.14f)
+        val pillBorder = if (dark) Palette.emeraldAccent.copy(alpha = 0.38f) else Palette.emeraldAccent.copy(alpha = 0.45f)
 
         // Animated indicator pill
         Box(
@@ -87,18 +87,14 @@ fun GlassTabBar(
                 .offset(x = pillOffset)
                 .size(TAB_WIDTH, TAB_HEIGHT)
                 .background(pillBg, pillShape)
-                .border(0.5.dp, pillBorder, pillShape)
+                .border(0.75.dp, pillBorder, pillShape)
                 .clip(pillShape)
         )
 
         Row {
             for (tab in tabs) {
                 val isSelected = tab.route == selectedRoute
-                val itemTint = if (isSelected) {
-                    if (dark) Palette.emeraldAccent else Palette.text
-                } else {
-                    Palette.secondary
-                }
+                val itemTint = if (isSelected) Palette.emeraldAccent else Palette.secondary
 
                 Column(
                     modifier = Modifier

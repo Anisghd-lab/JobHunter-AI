@@ -135,8 +135,9 @@ object ApplicationAutomationManager {
     }
 
     /**
-     * Step 2: Verifies deadline, builds MLDP Cover Letter & selects CV attachment:
-     * attaches the ORIGINAL uploaded CV file by default unless modified by the user/AI
+     * Step 2: Verifies deadline, builds MLDP Cover Letter & selects language-matched CV:
+     * picks FR CV for French offers & EN CV for English/Gulf/Worldwide offers,
+     * attaching the ORIGINAL file by default unless modified by the user/AI
      * or an incompatible format (e.g. DOCX required vs PDF original) demands regeneration.
      */
     suspend fun prepareAndApply(
@@ -148,7 +149,8 @@ object ApplicationAutomationManager {
         sendSilentEmailIfConfigured: Boolean = true,
         forceTailoredCv: Boolean? = null
     ): Result<ApplicationOutcome> = withContext(Dispatchers.IO) {
-        if (profile.rawCvContent.isBlank()) {
+        val migratedProfile = profile.migrateLegacySlotIfNeeded()
+        if (migratedProfile.combinedSearchCorpus().isBlank()) {
             return@withContext Result.failure(
                 IllegalStateException("Aucun CV réel chargé. Importez votre CV PDF ou DOCX avant de postuler.")
             )
@@ -159,12 +161,24 @@ object ApplicationAutomationManager {
 
         val targetEmail = liveOffer.recruiterEmail
         val engine = CvTailoringEngine(settings)
+        val offerIsFrench = engine.isFrenchOffer(liveOffer)
+        val chosenSlot = if (offerIsFrench) {
+            migratedProfile.frenchCv ?: migratedProfile.englishCv
+        } else {
+            migratedProfile.englishCv ?: migratedProfile.frenchCv
+        }
+        val langTag = when {
+            offerIsFrench && migratedProfile.frenchCv != null -> "FR"
+            !offerIsFrench && migratedProfile.englishCv != null -> "EN"
+            migratedProfile.frenchCv != null -> "FR"
+            else -> "EN"
+        }
 
         // Generate personalized Cover Letter strictly following MLDP 7-part standard & job targeting
-        val mldpLetter = engine.generateMldpCoverLetter(liveOffer, profile)
+        val mldpLetter = engine.generateMldpCoverLetter(liveOffer, migratedProfile)
         val coverLetter = mldpLetter.toPlainText()
 
-        val safeName = profile.fullName.ifBlank { "Candidat" }
+        val safeName = migratedProfile.fullName.ifBlank { "Candidat" }
             .replace(Regex("[^a-zA-Z0-9_-]"), "_")
         val safeCompany = offer.company.ifBlank { "Entreprise" }
             .replace(Regex("[^a-zA-Z0-9_-]"), "_")
@@ -172,9 +186,10 @@ object ApplicationAutomationManager {
 
         val outputDir = File(context.filesDir, "applications").apply { mkdirs() }
 
-        // Check whether to attach the Original uploaded CV vs generating a Modified/Tailored CV
+        // Check whether to attach the Original uploaded EN/FR CV vs generating a Modified/Tailored CV
         val useDocx = liveOffer.requiredFormat == DocumentFormatRequirement.DOCX
-        val originalFile = profile.sourceCvPath.takeIf { it.isNotBlank() }
+        val candidatePath = chosenSlot?.filePath?.ifBlank { migratedProfile.sourceCvPath } ?: migratedProfile.sourceCvPath
+        val originalFile = candidatePath.takeIf { it.isNotBlank() }
             ?.let { File(it) }
             ?.takeIf { it.exists() && it.length() > 0L }
         val originalExt = originalFile?.extension?.lowercase().orEmpty()
@@ -183,24 +198,25 @@ object ApplicationAutomationManager {
                 (liveOffer.requiredFormat == DocumentFormatRequirement.PDF && originalExt == "pdf") ||
                 (liveOffer.requiredFormat == DocumentFormatRequirement.DOCX && (originalExt == "docx" || originalExt == "doc"))
             )
-        val modificationRequested = forceTailoredCv ?: (profile.isModifiedCv || settings.adaptCvPerOffer)
+        val slotModified = (chosenSlot?.isModified == true) || migratedProfile.isModifiedCv
+        val modificationRequested = forceTailoredCv ?: (slotModified || settings.adaptCvPerOffer)
         val attachOriginalCv = originalFormatMatches && !modificationRequested
 
-        val cvFile: File = if (attachOriginalCv && originalFile != null) {
-            File(outputDir, "CV_${safeName}_Original_${uniqueSuffix}.${originalExt}").also { dest ->
-                originalFile.copyTo(dest, overwrite = true)
+        val cvFile: File = if (attachOriginalCv) {
+            File(outputDir, "CV_${safeName}_${langTag}_Original_${uniqueSuffix}.${originalExt}").also { dest ->
+                originalFile!!.copyTo(dest, overwrite = true)
             }
         } else {
-            val tailored = engine.tailorCvContent(liveOffer, profile).getOrNull()
-            val cvSections = buildCvSections(profile, tailored)
-            val cvHeaderTitle = "${profile.fullName.ifBlank { "CV" }} — ${tailored?.targetTitle?.ifBlank { profile.title } ?: profile.title}"
+            val tailored = engine.tailorCvContent(liveOffer, migratedProfile).getOrNull()
+            val cvSections = buildCvSections(migratedProfile, tailored)
+            val cvHeaderTitle = "${migratedProfile.fullName.ifBlank { "CV" }} — ${tailored?.targetTitle?.ifBlank { migratedProfile.title } ?: migratedProfile.title}"
 
             if (useDocx) {
-                File(outputDir, "CV_${safeName}_${uniqueSuffix}.docx").also { f ->
+                File(outputDir, "CV_${safeName}_${langTag}_${uniqueSuffix}.docx").also { f ->
                     DocxGenerator.generateDocx(cvHeaderTitle, cvSections, f)
                 }
             } else {
-                File(outputDir, "CV_${safeName}_${uniqueSuffix}.pdf").also { f ->
+                File(outputDir, "CV_${safeName}_${langTag}_${uniqueSuffix}.pdf").also { f ->
                     PdfGenerator.generatePdf(cvHeaderTitle, cvSections, f)
                 }
             }
@@ -218,9 +234,9 @@ object ApplicationAutomationManager {
         }
 
         val cvKindLabel = when {
-            attachOriginalCv -> "CV original (${originalExt.uppercase()})"
-            originalFile == null -> "CV généré (ré-importez votre fichier dans Mon CV pour joindre l'original)"
-            else -> "CV modifié (${cvFile.extension.uppercase()})"
+            attachOriginalCv -> "CV original $langTag (${originalExt.uppercase()})"
+            originalFile == null -> "CV $langTag généré (ré-importez dans Mon CV pour joindre l'original)"
+            else -> "CV $langTag modifié (${cvFile.extension.uppercase()})"
         }
 
         val attachments = listOf(cvFile, letterFile)
@@ -232,40 +248,25 @@ object ApplicationAutomationManager {
         var channelLabel = ""
         var resultMessage = ""
 
+        val allowAutoSend = sendSilentEmailIfConfigured && (settings.aiAutonomousEmailControl || settings.hasEmailCredentials())
         if (targetEmail.isNotBlank()) {
-            if (sendSilentEmailIfConfigured && settings.hasEmailCredentials()) {
-                val authType = if (settings.gmailOAuthToken.isNotBlank()) {
-                    EmailAuthType.OAUTH2_GMAIL
-                } else {
-                    EmailAuthType.SMTP_DIRECT
-                }
-                val dispatcher = EmailDispatcher(
-                    EmailConfig(
-                        authType = authType,
-                        senderEmail = settings.senderEmail.ifBlank { profile.email },
-                        senderName = profile.fullName,
-                        smtpHost = settings.smtpHost,
-                        smtpPort = settings.smtpPort,
-                        smtpUser = settings.senderEmail.ifBlank { profile.email },
-                        smtpPassword = settings.smtpPassword,
-                        oauthAccessToken = settings.gmailOAuthToken
-                    )
-                )
+            if (allowAutoSend && settings.hasEmailCredentials()) {
+                val dispatcher = EmailDispatcher(buildEmailConfig(settings, migratedProfile))
                 val emailRes = dispatcher.sendApplicationEmail(
                     recipientEmail = targetEmail,
-                    subject = "${mldpLetter.subject} - ${profile.fullName}",
+                    subject = "${mldpLetter.subject} - ${migratedProfile.fullName}",
                     bodyText = coverLetter,
                     attachments = attachments
                 )
                 if (emailRes.isSuccess) {
                     sentSilently = true
                     finalStatus = JobStatus.APPLIED
-                    channelLabel = "Email envoyé à $targetEmail"
+                    channelLabel = "Email auto envoyé à $targetEmail"
                     resultMessage = "Candidature envoyée à $targetEmail ($cvKindLabel + Lettre MLDP) !"
                 } else {
                     needsEmailIntent = true
-                    channelLabel = "Email prêt ($targetEmail) — Échec SMTP: ${emailRes.exceptionOrNull()?.message?.take(40)}"
-                    resultMessage = "Dossier prêt ($cvKindLabel + Lettre MLDP). Ouvrez votre appli Email."
+                    channelLabel = "Email prêt ($targetEmail) — Erreur SMTP: ${emailRes.exceptionOrNull()?.message?.take(45)}"
+                    resultMessage = "Échec SMTP (${emailRes.exceptionOrNull()?.message?.take(50)}) — ouvrez l'appli Email."
                 }
             } else {
                 needsEmailIntent = true
@@ -302,6 +303,130 @@ object ApplicationAutomationManager {
                 message = resultMessage,
                 usesOriginalCv = attachOriginalCv
             )
+        )
+    }
+
+    /**
+     * Sends an immediate AI-crafted follow-up email for an already APPLIED job offer.
+     */
+    suspend fun sendFollowUpNow(
+        context: Context,
+        offer: JobOffer,
+        profile: UserProfile,
+        settings: AppSettings
+    ): Result<JobOffer> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (!settings.hasEmailCredentials()) {
+                error("Configurez d'abord votre email & App Password dans Agent 24/7.")
+            }
+            if (offer.recruiterEmail.isBlank()) {
+                error("Aucun e-mail recruteur enregistré pour cette candidature.")
+            }
+            if (DeadlineParser.isExpiredOrStale(offer)) {
+                error("Offre expirée — relance annulée.")
+            }
+
+            val engine = CvTailoringEngine(settings)
+            val (subject, body) = engine.generateFollowUpEmail(offer, profile)
+            val dispatcher = EmailDispatcher(buildEmailConfig(settings, profile))
+            val attachments = listOfNotNull(
+                offer.tailoredCvPath.takeIf { it.isNotBlank() }?.let { File(it) }?.takeIf { it.exists() }
+            )
+            dispatcher.sendApplicationEmail(offer.recruiterEmail, subject, body, attachments).getOrThrow()
+
+            val updated = offer.copy(
+                followUpCount = offer.followUpCount + 1,
+                lastFollowUpAt = System.currentTimeMillis(),
+                lastReplySummary = "Relance IA envoyée à ${offer.recruiterEmail}"
+            )
+            AppDatabase.getInstance(context).jobOfferDao().insertOrUpdate(JobOfferEntity.fromDomain(updated))
+            updated
+        }
+    }
+
+    /**
+     * Autonomous AI Email Tracking & Relance Cycle:
+     * 1) Scans IMAP INBOX (read-only) for genuine recruiter replies matching APPLIED offers and auto-classifies
+     *    INTERVIEW / REJECTED statuses.
+     * 2) Automatically dispatches a polite J+N AI follow-up when autoFollowUpEnabled is active.
+     */
+    suspend fun runAutonomousEmailFollowUpCycle(
+        context: Context,
+        profile: UserProfile,
+        settings: AppSettings
+    ): Pair<Int, String> = withContext(Dispatchers.IO) {
+        if (!settings.hasEmailCredentials() || settings.smtpPassword.isBlank()) {
+            return@withContext 0 to "SMTP/App Password requis pour le suivi autonome."
+        }
+        val dao = AppDatabase.getInstance(context).jobOfferDao()
+        val applied = dao.getOffersByStatusOnce(JobStatus.APPLIED.name).map { it.toDomain() }
+        if (applied.isEmpty()) return@withContext 0 to "Aucune candidature envoyée à suivre."
+
+        val engine = CvTailoringEngine(settings)
+        val dispatcher = EmailDispatcher(buildEmailConfig(settings, profile))
+        var updates = 0
+        val highlights = mutableListOf<String>()
+
+        // 1. Check IMAP replies (read-only)
+        val replies = dispatcher.fetchRecentInboxReplies(maxMessages = 25).getOrNull().orEmpty()
+        if (replies.isNotEmpty()) {
+            for (offer in applied) {
+                val recDomain = offer.recruiterEmail.substringAfter("@", "").lowercase()
+                val companyKey = offer.company.lowercase().trim()
+                val matchedReply = replies.firstOrNull { rep ->
+                    val hay = "${rep.from} ${rep.subject} ${rep.snippet}".lowercase()
+                    (offer.recruiterEmail.isNotBlank() && hay.contains(offer.recruiterEmail.lowercase())) ||
+                        (recDomain.length >= 4 && !recDomain.contains("gmail") && !recDomain.contains("yahoo") && hay.contains(recDomain)) ||
+                        (companyKey.length >= 4 && hay.contains(companyKey))
+                }
+                if (matchedReply != null) {
+                    val (newStatus, summary) = engine.classifyRecruiterReply(offer, matchedReply)
+                    if (newStatus != offer.status || summary != offer.lastReplySummary) {
+                        val updated = offer.copy(status = newStatus, lastReplySummary = summary)
+                        dao.insertOrUpdate(JobOfferEntity.fromDomain(updated))
+                        updates++
+                        highlights.add("${offer.company}: $summary")
+                    }
+                }
+            }
+        }
+
+        // 2. Auto Follow-up (J+N) on unanswered APPLIED offers
+        if (settings.autoFollowUpEnabled) {
+            val now = System.currentTimeMillis()
+            val delayMs = settings.followUpDelayDays.coerceIn(2, 14) * 86_400_000L
+            for (offer in applied.take(3)) {
+                val current = dao.getOfferById(offer.id)?.toDomain() ?: continue
+                if (current.status != JobStatus.APPLIED || current.followUpCount > 0) continue
+                if (current.recruiterEmail.isBlank() || current.appliedAt == 0L) continue
+                if (now - current.appliedAt < delayMs) continue
+                if (DeadlineParser.isExpiredOrStale(current, now)) continue
+
+                sendFollowUpNow(context, current, profile, settings).onSuccess {
+                    updates++
+                    highlights.add("Relance IA envoyée à ${current.company}")
+                }
+            }
+        }
+
+        updates to (highlights.joinToString(" · ").ifBlank { "Boîte vérifiée — aucune nouvelle réponse." })
+    }
+
+    fun buildEmailConfig(settings: AppSettings, profile: UserProfile = UserProfile()): EmailConfig {
+        val authType = if (settings.gmailOAuthToken.isNotBlank()) {
+            EmailAuthType.OAUTH2_GMAIL
+        } else {
+            EmailAuthType.SMTP_DIRECT
+        }
+        return EmailConfig(
+            authType = authType,
+            senderEmail = settings.senderEmail.ifBlank { profile.email },
+            senderName = profile.fullName,
+            smtpHost = settings.smtpHost,
+            smtpPort = settings.smtpPort,
+            smtpUser = settings.senderEmail.ifBlank { profile.email },
+            smtpPassword = settings.smtpPassword,
+            oauthAccessToken = settings.gmailOAuthToken
         )
     }
 

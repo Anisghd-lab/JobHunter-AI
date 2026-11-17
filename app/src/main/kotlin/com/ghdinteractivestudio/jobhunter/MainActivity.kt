@@ -36,10 +36,13 @@ import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomatio
 import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationOutcome
 import com.ghdinteractivestudio.jobhunter.domain.document.CvParser
 import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
+import com.ghdinteractivestudio.jobhunter.domain.model.CvDocumentSlot
+import com.ghdinteractivestudio.jobhunter.domain.model.CvLanguage
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
 import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
 import com.ghdinteractivestudio.jobhunter.domain.model.UserProfile
 import com.ghdinteractivestudio.jobhunter.ui.components.GlassTabBar
+import com.ghdinteractivestudio.jobhunter.ui.components.LiquidGlassBackdrop
 import com.ghdinteractivestudio.jobhunter.ui.screens.AgentScreen
 import com.ghdinteractivestudio.jobhunter.ui.screens.CvScreen
 import com.ghdinteractivestudio.jobhunter.ui.screens.PipelineScreen
@@ -61,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private val isAnalyzingCvState = MutableStateFlow(false)
     private val busyOfferIdState = MutableStateFlow<String?>(null)
     private val activeOutcomeState = MutableStateFlow<ApplicationOutcome?>(null)
+    private val isCheckingFollowUpState = MutableStateFlow(false)
 
     private val scanner = JobScanner()
 
@@ -94,7 +98,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             profileDao.getProfileFlow().collect { entity ->
                 if (entity != null) {
-                    val domainProfile = entity.toDomain()
+                    val domainProfile = entity.toDomain().migrateLegacySlotIfNeeded()
                     userProfileState.value = domainProfile
                     autoConfigureEmailPresetIfBlank(domainProfile, settingsRepo)
                 }
@@ -124,13 +128,15 @@ class MainActivity : ComponentActivity() {
             val isAnalyzingCv by isAnalyzingCvState.collectAsState()
             val busyOfferId by busyOfferIdState.collectAsState()
             val activeOutcome by activeOutcomeState.collectAsState()
+            val isCheckingFollowUp by isCheckingFollowUpState.collectAsState()
 
             JobHunterTheme(darkTheme = settings.isDarkTheme) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                ) {
+                LiquidGlassBackdrop {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .statusBarsPadding()
+                    ) {
                     when (currentTab) {
                         "radar" -> RadarScreen(
                             offersFlow = allOffersState,
@@ -182,6 +188,40 @@ class MainActivity : ComponentActivity() {
 
                         "pipeline" -> PipelineScreen(
                             allOffersFlow = allOffersState,
+                            isCheckingFollowUp = isCheckingFollowUp,
+                            onRunAiFollowUpClick = {
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    if (isCheckingFollowUpState.value) return@launch
+                                    isCheckingFollowUpState.value = true
+                                    val (updates, summary) = ApplicationAutomationManager.runAutonomousEmailFollowUpCycle(
+                                        context = this@MainActivity,
+                                        profile = userProfileState.value,
+                                        settings = settingsRepo.settings.value
+                                    )
+                                    isCheckingFollowUpState.value = false
+                                    withContext(Dispatchers.Main) {
+                                        val msg = if (updates > 0) "$updates mise(s) à jour IA : $summary" else summary
+                                        Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            onSendFollowUpClick = { offer ->
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val res = ApplicationAutomationManager.sendFollowUpNow(
+                                        context = this@MainActivity,
+                                        offer = offer,
+                                        profile = userProfileState.value,
+                                        settings = settingsRepo.settings.value
+                                    )
+                                    withContext(Dispatchers.Main) {
+                                        res.onSuccess {
+                                            Toast.makeText(this@MainActivity, "Relance IA envoyée à ${offer.recruiterEmail} ✓", Toast.LENGTH_SHORT).show()
+                                        }.onFailure { err ->
+                                            Toast.makeText(this@MainActivity, err.message ?: "Erreur relance", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            },
                             onUpdateStatus = { offer, newStatus ->
                                 coroutineScope.launch {
                                     markOfferStatus(offer, newStatus)
@@ -218,10 +258,18 @@ class MainActivity : ComponentActivity() {
                         "cv" -> CvScreen(
                             profileFlow = userProfileState,
                             isAnalyzingCv = isAnalyzingCv,
-                            onImportCv = { uri ->
+                            onImportCvForLang = { uri, lang ->
                                 coroutineScope.launch {
-                                    handleImportCv(uri, settingsRepo)
+                                    handleImportCv(uri, settingsRepo, targetLang = lang)
                                 }
+                            },
+                            onDeleteCvForLang = { lang ->
+                                coroutineScope.launch {
+                                    handleDeleteCvSlot(lang, settingsRepo)
+                                }
+                            },
+                            onViewCvForLang = { lang ->
+                                handleViewCvSlot(lang)
                             },
                             onReanalyzeWithAi = {
                                 coroutineScope.launch {
@@ -259,6 +307,7 @@ class MainActivity : ComponentActivity() {
                             selectedRoute = currentTab,
                             onTabSelected = { currentTab = it }
                         )
+                    }
                     }
                 }
             }
@@ -343,15 +392,20 @@ class MainActivity : ComponentActivity() {
         isScanningState.value = false
     }
 
-    private suspend fun handleImportCv(uri: Uri, settingsRepo: SettingsRepository) = withContext(Dispatchers.IO) {
+    private suspend fun handleImportCv(
+        uri: Uri,
+        settingsRepo: SettingsRepository,
+        targetLang: CvLanguage = CvLanguage.EN
+    ) = withContext(Dispatchers.IO) {
         isAnalyzingCvState.value = true
         runCatching {
             val extractedData = CvParser.parseCvFile(this@MainActivity, uri)
+            val existing = userProfileState.value.migrateLegacySlotIfNeeded()
 
-            // Save persistent backup copy of original user CV file cleanly inside app storage
+            // Save persistent backup copy of original user CV file cleanly inside app storage per language slot
             val backupFile = runCatching {
                 val cvDir = File(filesDir, "source_cv").apply { mkdirs() }
-                val dest = File(cvDir, extractedData.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_"))
+                val dest = File(cvDir, "${targetLang.code}_${extractedData.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")}")
                 if (uri.scheme == "file" && uri.path != null) {
                     File(uri.path!!).copyTo(dest, overwrite = true)
                 } else {
@@ -362,49 +416,64 @@ class MainActivity : ComponentActivity() {
                 dest.absolutePath
             }.getOrDefault("")
 
+            val newSlot = CvDocumentSlot(
+                fileName = extractedData.fileName,
+                format = extractedData.format,
+                filePath = backupFile,
+                rawText = extractedData.rawText,
+                isModified = false,
+                parsedAt = System.currentTimeMillis()
+            )
+            val withSlot = existing.withSlot(targetLang, newSlot)
+
+            val combinedCorpus = listOfNotNull(
+                withSlot.englishCv?.rawText?.takeIf { it.isNotBlank() },
+                withSlot.frenchCv?.rawText?.takeIf { it.isNotBlank() }
+            ).joinToString("\n\n---\n\n").ifBlank { extractedData.rawText }
+
             val settings = settingsRepo.settings.value
             val engine = CvTailoringEngine(settings)
-
-            // Parse with Free LLM Intelligence & Delicacy when available, else clean deterministic fallback
-            val aiParsed = if (extractedData.rawText.isNotBlank() && settings.hasAnyAiKey()) {
-                engine.parseCvWithIntelligence(extractedData.rawText).getOrNull()
+            val aiParsed = if (combinedCorpus.isNotBlank() && settings.hasAnyAiKey()) {
+                engine.parseCvWithIntelligence(combinedCorpus).getOrNull()
             } else null
 
             val baseProfile = aiParsed ?: extractedData.deterministicProfile
-
-            // Always ensure key deterministic fields are preserved and zero hallucination overrides
             val det = extractedData.deterministicProfile
             val finalProfile = baseProfile.copy(
-                fullName = baseProfile.fullName.ifBlank { det.fullName },
-                email = baseProfile.email.ifBlank { det.email },
-                phone = baseProfile.phone.ifBlank { det.phone },
-                title = baseProfile.title.ifBlank { det.title },
-                skills = baseProfile.skills.ifEmpty { det.skills },
-                experiences = baseProfile.experiences.ifEmpty { det.experiences },
-                educations = baseProfile.educations.ifEmpty { det.educations },
-                languages = baseProfile.languages.ifEmpty { det.languages },
+                fullName = baseProfile.fullName.ifBlank { det.fullName.ifBlank { existing.fullName } },
+                email = baseProfile.email.ifBlank { det.email.ifBlank { existing.email } },
+                phone = baseProfile.phone.ifBlank { det.phone.ifBlank { existing.phone } },
+                address = baseProfile.address.ifBlank { det.address.ifBlank { existing.address } },
+                title = baseProfile.title.ifBlank { det.title.ifBlank { existing.title } },
+                skills = (baseProfile.skills + existing.skills).distinct().ifEmpty { det.skills },
+                softSkills = (baseProfile.softSkills + existing.softSkills).distinct(),
+                experiences = baseProfile.experiences.ifEmpty { det.experiences.ifEmpty { existing.experiences } },
+                educations = baseProfile.educations.ifEmpty { det.educations.ifEmpty { existing.educations } },
+                certifications = baseProfile.certifications.ifEmpty { det.certifications.ifEmpty { existing.certifications } },
+                languages = (baseProfile.languages + existing.languages).distinct().ifEmpty { det.languages },
                 sourceCvFileName = extractedData.fileName,
                 sourceCvFormat = extractedData.format,
                 sourceCvPath = backupFile,
-                rawCvContent = extractedData.rawText,
+                rawCvContent = combinedCorpus,
                 isModifiedCv = false,
+                englishCv = withSlot.englishCv,
+                frenchCv = withSlot.frenchCv,
                 parsedAt = System.currentTimeMillis()
             )
 
-            val db = AppDatabase.getInstance(this@MainActivity)
-            db.userProfileDao().saveProfile(UserProfileEntity.fromDomain(finalProfile))
+            AppDatabase.getInstance(this@MainActivity).userProfileDao()
+                .saveProfile(UserProfileEntity.fromDomain(finalProfile))
             userProfileState.value = finalProfile
 
             val usedAi = aiParsed != null
             withContext(Dispatchers.Main) {
                 Toast.makeText(
                     this@MainActivity,
-                    if (usedAi) "CV analysé avec l'IA Gratuite !" else "CV réel '${extractedData.fileName}' importé !",
+                    if (usedAi) "CV ${targetLang.label} analysé avec l'IA !" else "CV ${targetLang.label} '${extractedData.fileName}' importé !",
                     Toast.LENGTH_SHORT
                 ).show()
             }
 
-            // Automatically trigger a targeted job radar scan matching the freshly imported CV
             handleRefreshScan(finalProfile, settingsRepo, showToast = false)
         }.onFailure { err ->
             withContext(Dispatchers.Main) {
@@ -414,14 +483,78 @@ class MainActivity : ComponentActivity() {
         isAnalyzingCvState.value = false
     }
 
+    private suspend fun handleDeleteCvSlot(
+        lang: CvLanguage,
+        settingsRepo: SettingsRepository
+    ) = withContext(Dispatchers.IO) {
+        val current = userProfileState.value.migrateLegacySlotIfNeeded()
+        current.slotFor(lang)?.filePath?.takeIf { it.isNotBlank() }?.let { path ->
+            runCatching { File(path).delete() }
+        }
+        val cleared = current.withSlot(lang, null)
+        val remaining = cleared.frenchCv ?: cleared.englishCv
+
+        val updatedProfile = if (remaining == null) {
+            UserProfile()
+        } else {
+            val reParsed = runCatching { CvTailoringEngine(settingsRepo.settings.value) }
+            val aiParsed = if (settingsRepo.settings.value.hasAnyAiKey()) {
+                reParsed.getOrNull()?.parseCvWithIntelligence(remaining.rawText)?.getOrNull()
+            } else null
+            val base = aiParsed ?: cleared
+            base.copy(
+                fullName = base.fullName.ifBlank { current.fullName },
+                email = base.email.ifBlank { current.email },
+                phone = base.phone.ifBlank { current.phone },
+                sourceCvFileName = remaining.fileName,
+                sourceCvFormat = remaining.format,
+                sourceCvPath = remaining.filePath,
+                rawCvContent = remaining.rawText,
+                isModifiedCv = remaining.isModified,
+                englishCv = cleared.englishCv,
+                frenchCv = cleared.frenchCv,
+                parsedAt = remaining.parsedAt
+            )
+        }
+
+        AppDatabase.getInstance(this@MainActivity).userProfileDao()
+            .saveProfile(UserProfileEntity.fromDomain(updatedProfile))
+        userProfileState.value = updatedProfile
+
+        withContext(Dispatchers.Main) {
+            Toast.makeText(this@MainActivity, "CV ${lang.label} supprimé ✓", Toast.LENGTH_SHORT).show()
+        }
+        if (remaining != null) {
+            handleRefreshScan(updatedProfile, settingsRepo, showToast = false)
+        }
+    }
+
+    private fun handleViewCvSlot(lang: CvLanguage) {
+        val slot = userProfileState.value.migrateLegacySlotIfNeeded().slotFor(lang)
+        val path = slot?.filePath.orEmpty()
+        if (path.isBlank() || !File(path).exists()) {
+            Toast.makeText(this, "Fichier source manquant — ré-importez ce CV une fois.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = ApplicationAutomationManager.buildViewOrShareFileIntent(this, path, share = false)
+        if (intent != null) {
+            runCatching {
+                startActivity(Intent.createChooser(intent, "Ouvrir CV ${lang.label}"))
+            }.onFailure {
+                Toast.makeText(this, "Aucune visionneuse PDF/DOCX trouvée sur l'appareil.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     private suspend fun handleReanalyzeCvWithAi(settingsRepo: SettingsRepository) = withContext(Dispatchers.IO) {
-        val current = userProfileState.value
-        if (current.rawCvContent.isBlank()) return@withContext
+        val current = userProfileState.value.migrateLegacySlotIfNeeded()
+        val corpus = current.combinedSearchCorpus()
+        if (corpus.isBlank()) return@withContext
         isAnalyzingCvState.value = true
         runCatching {
             val settings = settingsRepo.settings.value
             val engine = CvTailoringEngine(settings)
-            val parsed = engine.parseCvWithIntelligence(current.rawCvContent).getOrThrow()
+            val parsed = engine.parseCvWithIntelligence(corpus).getOrThrow()
 
             val updated = parsed.copy(
                 fullName = parsed.fullName.ifBlank { current.fullName },
@@ -432,6 +565,8 @@ class MainActivity : ComponentActivity() {
                 sourceCvPath = current.sourceCvPath,
                 rawCvContent = current.rawCvContent,
                 isModifiedCv = current.isModifiedCv,
+                englishCv = current.englishCv,
+                frenchCv = current.frenchCv,
                 parsedAt = System.currentTimeMillis()
             )
             AppDatabase.getInstance(this@MainActivity).userProfileDao()
@@ -439,7 +574,7 @@ class MainActivity : ComponentActivity() {
             userProfileState.value = updated
 
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "Analyse IA du CV mise à jour !", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Analyse IA (EN/FR) mise à jour !", Toast.LENGTH_SHORT).show()
             }
         }.onFailure { err ->
             withContext(Dispatchers.Main) {

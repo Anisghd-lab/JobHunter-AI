@@ -29,8 +29,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.OpenInBrowser
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -47,6 +46,8 @@ import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomatio
 import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
 import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassSoftButton
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassSolidButton
 import com.ghdinteractivestudio.jobhunter.ui.components.glassCard
 import com.ghdinteractivestudio.jobhunter.ui.theme.Capsule
 import com.ghdinteractivestudio.jobhunter.ui.theme.LocalDark
@@ -65,6 +66,9 @@ import java.util.Locale
 @Composable
 fun PipelineScreen(
     allOffersFlow: StateFlow<List<JobOffer>>,
+    isCheckingFollowUp: Boolean = false,
+    onRunAiFollowUpClick: () -> Unit = {},
+    onSendFollowUpClick: (JobOffer) -> Unit = {},
     onUpdateStatus: (JobOffer, JobStatus) -> Unit,
     onPrepareOrDispatchClick: (JobOffer) -> Unit,
     onRemoveFromPipeline: (JobOffer) -> Unit,
@@ -82,7 +86,6 @@ fun PipelineScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Palette.background)
             .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(16.dp))
@@ -112,7 +115,19 @@ fun PipelineScreen(
             )
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(12.dp))
+
+        GlassSoftButton(
+            text = if (isCheckingFollowUp) "Analyse boîte & relances IA..." else "Suivi Réponses & Relances IA",
+            icon = Icons.Default.Sync,
+            accentColor = Palette.emeraldAccent,
+            isLoading = isCheckingFollowUp,
+            height = 40.dp,
+            onClick = onRunAiFollowUpClick,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(14.dp))
 
         Text(
             text = "SUIVI RÉEL DES CANDIDATURES (${trackedApps.size})",
@@ -161,6 +176,7 @@ fun PipelineScreen(
                         app = app,
                         onUpdateStatus = { newStatus -> onUpdateStatus(app, newStatus) },
                         onDispatchClick = { onPrepareOrDispatchClick(app) },
+                        onFollowUpClick = { onSendFollowUpClick(app) },
                         onRemoveClick = { onRemoveFromPipeline(app) }
                     )
                 }
@@ -206,6 +222,7 @@ fun ApplicationTrackingCard(
     app: JobOffer,
     onUpdateStatus: (JobStatus) -> Unit,
     onDispatchClick: () -> Unit,
+    onFollowUpClick: () -> Unit,
     onRemoveClick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -418,60 +435,76 @@ fun ApplicationTrackingCard(
 
             Spacer(Modifier.height(8.dp))
 
-            // Pipeline Action Buttons
+            // Pipeline Reply & Deadline Summary + Uniform Action Buttons
+            if (app.lastReplySummary.isNotBlank() || app.followUpCount > 0) {
+                val followSuffix = if (app.followUpCount > 0) " (${app.followUpCount} relance(s))" else ""
+                Text(
+                    text = "🤖 Suivi IA$followSuffix : ${app.lastReplySummary.ifBlank { "En attente de retour" }}",
+                    style = Type.label.bold,
+                    color = Palette.electricBlue
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+
             val isExpired = DeadlineParser.isExpiredOrStale(app)
             if (app.deadlineAt > 0L) {
                 Text(
                     text = if (isExpired) "⛔ Date limite dépassée (${app.deadlineLabel})" else "⏰ ${DeadlineParser.formatDaysRemaining(app.deadlineAt)}",
                     style = Type.label.bold,
-                    color = if (isExpired) Color(0xFFF87171) else Palette.attention
+                    color = if (isExpired) Palette.danger else Palette.attention
                 )
                 Spacer(Modifier.height(6.dp))
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (app.status == JobStatus.ANALYZED || app.status == JobStatus.READY_TO_SEND) {
-                    Button(
-                        onClick = onDispatchClick,
+                    GlassSolidButton(
+                        text = when {
+                            isExpired -> "Expirée"
+                            app.status == JobStatus.ANALYZED -> "Générer"
+                            else -> "Envoyer"
+                        },
+                        icon = Icons.AutoMirrored.Filled.Send,
+                        containerColor = Palette.emeraldSolidBg,
                         enabled = !isExpired,
-                        shape = Capsule(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent, contentColor = Color.White),
+                        height = 40.dp,
+                        onClick = onDispatchClick,
                         modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = if (isExpired) "Expirée" else if (app.status == JobStatus.ANALYZED) "Générer & Postuler" else "Envoyer / Ouvrir",
-                            style = Type.label.bold
-                        )
-                    }
+                    )
                 }
 
                 if (app.status != JobStatus.APPLIED && app.status != JobStatus.INTERVIEW) {
-                    Button(
+                    GlassSoftButton(
+                        text = "Postulé ✓",
+                        icon = Icons.Default.CheckCircle,
+                        accentColor = Palette.electricBlue,
+                        height = 40.dp,
                         onClick = { onUpdateStatus(JobStatus.APPLIED) },
-                        shape = Capsule(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Palette.electricBlue.copy(alpha = 0.2f), contentColor = Palette.electricBlue)
-                    ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Postulée", style = Type.label.bold)
-                    }
+                        modifier = Modifier.weight(1f)
+                    )
                 }
 
                 if (app.status == JobStatus.APPLIED) {
-                    Button(
-                        onClick = { onUpdateStatus(JobStatus.INTERVIEW) },
-                        shape = Capsule(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent.copy(alpha = 0.2f), contentColor = Palette.emeraldAccent),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Event, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Entretien décroché !", style = Type.label.bold)
+                    if (app.recruiterEmail.isNotBlank() && !isExpired) {
+                        GlassSoftButton(
+                            text = "Relancer IA",
+                            icon = Icons.AutoMirrored.Filled.Send,
+                            accentColor = Palette.electricBlue,
+                            height = 40.dp,
+                            onClick = onFollowUpClick,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
+                    GlassSoftButton(
+                        text = "Entretien",
+                        icon = Icons.Default.Event,
+                        accentColor = Palette.emeraldAccent,
+                        height = 40.dp,
+                        onClick = { onUpdateStatus(JobStatus.INTERVIEW) },
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }

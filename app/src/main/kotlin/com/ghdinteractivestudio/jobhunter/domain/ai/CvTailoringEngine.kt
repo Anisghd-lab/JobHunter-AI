@@ -2,10 +2,12 @@ package com.ghdinteractivestudio.jobhunter.domain.ai
 
 import com.ghdinteractivestudio.jobhunter.data.local.AppSettings
 import com.ghdinteractivestudio.jobhunter.domain.document.MldpCoverLetterData
+import com.ghdinteractivestudio.jobhunter.domain.email.IncomingReplyEmail
 import com.ghdinteractivestudio.jobhunter.domain.model.CertificationItem
 import com.ghdinteractivestudio.jobhunter.domain.model.EducationItem
 import com.ghdinteractivestudio.jobhunter.domain.model.ExperienceItem
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
+import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
 import com.ghdinteractivestudio.jobhunter.domain.model.UserProfile
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -605,10 +607,122 @@ Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
         }
     }
 
+    fun isFrenchOffer(offer: JobOffer): Boolean = looksLikeFrenchOffer(offer)
+
+    /**
+     * Generates a polite AI follow-up email referencing the submitted application & position.
+     */
+    suspend fun generateFollowUpEmail(offer: JobOffer, profile: UserProfile): Pair<String, String> {
+        val isFr = looksLikeFrenchOffer(offer)
+        val targeted = selectTargetedProfile(offer, profile)
+        val defaultSubject = if (isFr) {
+            "Relance : Candidature au poste de ${offer.title} - ${profile.fullName}"
+        } else {
+            "Follow-up: Application for ${offer.title} - ${profile.fullName}"
+        }
+
+        if (settings.hasAnyAiKey()) {
+            val prompt = """
+Rédige un court e-mail de relance courtois et professionnel (80 à 120 mots max) en ${if (isFr) "FRANÇAIS" else "ANGLAIS"}.
+Objet suggéré : $defaultSubject
+Candidat : ${profile.fullName}
+Entreprise : ${offer.company}
+Poste : ${offer.title}
+Atouts principaux ciblés : ${targeted.skills.take(3).joinToString(", ")}
+Expérience clé : ${targeted.experiences.firstOrNull()?.let { "${it.title} (${it.company})" } ?: targeted.title}
+Réponds UNIQUEMENT par le corps du message (sans objet ni balises markdown).
+            """.trimIndent()
+            val aiBody = LlmClient.generateWithFreeFallback(
+                settings,
+                prompt,
+                "Tu rédiges des emails de relance professionnels concis et respectueux."
+            ).getOrNull()?.text?.trim()
+            if (!aiBody.isNullOrBlank() && aiBody.length >= 60) {
+                return defaultSubject to aiBody
+            }
+        }
+
+        val fallbackBody = if (isFr) {
+            """
+Madame, Monsieur,
+
+Je me permets de revenir vers vous concernant ma candidature au poste de ${offer.title} au sein de ${offer.company}.
+
+Toujours vivement intéressé(e) par cette opportunité et convaincu(e) que mon expérience en ${targeted.skills.take(3).joinToString(", ").ifBlank { targeted.title }} répond aux besoins de votre équipe, je reste à votre entière disposition pour convenir d'un échange téléphonique ou d'un entretien à votre convenance.
+
+Je vous remercie par avance de votre retour et vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.
+
+${profile.fullName}
+${listOfNotNull(profile.phone.ifBlank { null }, profile.email.ifBlank { null }).joinToString(" | ")}
+            """.trim()
+        } else {
+            """
+Dear Hiring Team,
+
+I am writing to kindly follow up on my application for the ${offer.title} role at ${offer.company}.
+
+I remain strongly interested in contributing to your team, bringing hands-on expertise in ${targeted.skills.take(3).joinToString(", ").ifBlank { targeted.title }}. I would welcome the opportunity to discuss how my background aligns with your current goals.
+
+Thank you for your time and consideration. I look forward to hearing from you.
+
+Best regards,
+${profile.fullName}
+${listOfNotNull(profile.phone.ifBlank { null }, profile.email.ifBlank { null }).joinToString(" | ")}
+            """.trim()
+        }
+        return defaultSubject to fallbackBody
+    }
+
+    /**
+     * Classifies a genuine recruiter email reply scanned from IMAP into INTERVIEW, REJECTED, or APPLIED (with summary).
+     */
+    suspend fun classifyRecruiterReply(offer: JobOffer, reply: IncomingReplyEmail): Pair<JobStatus, String> {
+        val corpus = "${reply.subject} ${reply.snippet}".lowercase()
+        if (settings.hasAnyAiKey()) {
+            val prompt = """
+Classe cette réponse réelle de recruteur pour l'offre "${offer.title}" chez "${offer.company}".
+Sujet email : ${reply.subject}
+Extrait : ${reply.snippet}
+
+Réponds en une ligne exacte : VERDICT | Résumé court en français (max 15 mots)
+Où VERDICT est STRICTEMENT un de : INTERVIEW, REJECTED, ACK
+            """.trimIndent()
+            val aiLine = LlmClient.generateWithFreeFallback(
+                settings,
+                prompt,
+                "Tu classes précisément des réponses email de recrutement."
+            ).getOrNull()?.text?.trim()
+            if (!aiLine.isNullOrBlank()) {
+                val upper = aiLine.uppercase()
+                val summary = aiLine.substringAfter("|", reply.subject).trim().take(90)
+                return when {
+                    upper.startsWith("INTERVIEW") -> JobStatus.INTERVIEW to summary
+                    upper.startsWith("REJECTED") -> JobStatus.REJECTED to summary
+                    upper.startsWith("ACK") -> JobStatus.APPLIED to summary
+                    else -> classifyReplyKeywords(corpus, reply.subject)
+                }
+            }
+        }
+        return classifyReplyKeywords(corpus, reply.subject)
+    }
+
+    private fun classifyReplyKeywords(corpus: String, fallbackSubject: String): Pair<JobStatus, String> {
+        val interviewHints = listOf("entretien", "interview", "call", "meeting", "créneau", "rdv", "rendez-vous", "shortlist", "schedule", "zoom", "teams", "disponibilit")
+        val rejectHints = listOf("unfortunately", "not selected", "malheureusement", "pas retenu", "ne donnerons pas suite", "autre candidat", "other candidates", "regret to inform", "clôturé")
+        return when {
+            interviewHints.any { corpus.contains(it) } -> JobStatus.INTERVIEW to "Invitation entretien détectée (${fallbackSubject.take(45)})"
+            rejectHints.any { corpus.contains(it) } -> JobStatus.REJECTED to "Réponse négative (${fallbackSubject.take(45)})"
+            else -> JobStatus.APPLIED to "Réponse reçue : ${fallbackSubject.take(55)}"
+        }
+    }
+
     private fun looksLikeFrenchOffer(offer: JobOffer): Boolean {
-        val sample = "${offer.title} ${offer.description.take(400)}".lowercase()
-        val frHints = listOf("responsable", "gestionnaire", "administratif", "cadre ", "assistant", "poste ", "nous recherchons", "missions ", "profil ", "algérie", "candidature", "expérience")
-        return frHints.count { sample.contains(it) } >= 2 || offer.regionScope == "ALGERIA"
+        val sample = "${offer.title} ${offer.description.take(600)}".lowercase()
+        val frHints = listOf("responsable", "gestionnaire", "administratif", "cadre ", "assistant", "poste ", "nous recherchons", "missions ", "profil ", "algérie", "candidature", "expérience", "entreprise", "cdd", "cdi")
+        val enHints = listOf("requirements", "responsibilities", "we are looking for", "full-time", "apply now", "experience with", "salary", "united arab emirates", "saudi arabia", "qatar", "dubai", "riyadh", "doha", "remote ")
+        val frScore = frHints.count { sample.contains(it) }
+        val enScore = enHints.count { sample.contains(it) }
+        return if (frScore == 0 && enScore == 0) offer.regionScope == "ALGERIA" else frScore > enScore
     }
 
     private fun extractJsonObject(raw: String): String {

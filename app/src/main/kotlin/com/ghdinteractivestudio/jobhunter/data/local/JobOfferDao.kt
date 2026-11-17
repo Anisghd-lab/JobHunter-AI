@@ -15,6 +15,9 @@ interface JobOfferDao {
     @Query("SELECT * FROM job_offers WHERE status = :status ORDER BY detectedAt DESC")
     fun getOffersByStatus(status: String): Flow<List<JobOfferEntity>>
 
+    @Query("SELECT * FROM job_offers WHERE status = :status ORDER BY appliedAt ASC")
+    suspend fun getOffersByStatusOnce(status: String): List<JobOfferEntity>
+
     @Query("SELECT * FROM job_offers WHERE status != 'DETECTED' ORDER BY appliedAt DESC, detectedAt DESC")
     fun getPipelineOffers(): Flow<List<JobOfferEntity>>
 

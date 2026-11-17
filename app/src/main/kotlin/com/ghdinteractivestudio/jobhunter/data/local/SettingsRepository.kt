@@ -76,6 +76,9 @@ data class AppSettings(
     val autoApplyEnabled: Boolean = false,
     val autoApplyMinScore: Int = 70,
     val adaptCvPerOffer: Boolean = false,
+    val aiAutonomousEmailControl: Boolean = true,
+    val autoFollowUpEnabled: Boolean = true,
+    val followUpDelayDays: Int = 5,
     val isDarkTheme: Boolean = true,
     val lastScanTimestamp: Long = 0L
 ) {
@@ -129,6 +132,9 @@ class SettingsRepository private constructor(context: Context) {
             autoApplyEnabled = prefs.getBoolean("auto_apply", false),
             autoApplyMinScore = prefs.getInt("auto_apply_min_score", 70),
             adaptCvPerOffer = prefs.getBoolean("adapt_cv_per_offer", false),
+            aiAutonomousEmailControl = prefs.getBoolean("ai_auto_email", true),
+            autoFollowUpEnabled = prefs.getBoolean("auto_follow_up", true),
+            followUpDelayDays = prefs.getInt("follow_up_days", 5),
             isDarkTheme = prefs.getBoolean("dark_theme", true),
             lastScanTimestamp = prefs.getLong("last_scan_ts", 0L)
         )
@@ -153,6 +159,9 @@ class SettingsRepository private constructor(context: Context) {
             putBoolean("auto_apply", next.autoApplyEnabled)
             putInt("auto_apply_min_score", next.autoApplyMinScore)
             putBoolean("adapt_cv_per_offer", next.adaptCvPerOffer)
+            putBoolean("ai_auto_email", next.aiAutonomousEmailControl)
+            putBoolean("auto_follow_up", next.autoFollowUpEnabled)
+            putInt("follow_up_days", next.followUpDelayDays)
             putBoolean("dark_theme", next.isDarkTheme)
             putLong("last_scan_ts", next.lastScanTimestamp)
         }.apply()

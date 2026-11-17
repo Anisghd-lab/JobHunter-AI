@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContactMail
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
@@ -31,11 +32,9 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -48,13 +47,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.ghdinteractivestudio.jobhunter.domain.model.CvDocumentSlot
+import com.ghdinteractivestudio.jobhunter.domain.model.CvLanguage
 import com.ghdinteractivestudio.jobhunter.domain.model.UserProfile
-import com.ghdinteractivestudio.jobhunter.ui.components.GlassStyle
-import com.ghdinteractivestudio.jobhunter.ui.components.glass
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassFilterChip
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassSoftButton
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassSolidButton
 import com.ghdinteractivestudio.jobhunter.ui.components.glassCard
+import com.ghdinteractivestudio.jobhunter.ui.components.glassFieldColors
 import com.ghdinteractivestudio.jobhunter.ui.theme.Capsule
 import com.ghdinteractivestudio.jobhunter.ui.theme.LocalDark
 import com.ghdinteractivestudio.jobhunter.ui.theme.Palette
@@ -74,40 +76,54 @@ import java.util.Locale
 fun CvScreen(
     profileFlow: StateFlow<UserProfile>,
     isAnalyzingCv: Boolean,
-    onImportCv: (Uri) -> Unit,
+    onImportCvForLang: (Uri, CvLanguage) -> Unit,
+    onDeleteCvForLang: (CvLanguage) -> Unit,
+    onViewCvForLang: (CvLanguage) -> Unit,
     onReanalyzeWithAi: () -> Unit,
     onSaveProfile: (UserProfile) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val profile by profileFlow.collectAsState()
+    val rawProfile by profileFlow.collectAsState()
+    val profile = remember(rawProfile) { rawProfile.migrateLegacySlotIfNeeded() }
     val dark = LocalDark.current
-    var selectedViewMode by remember { mutableStateOf("analyse") } // "analyse" or "raw_text"
+    var selectedViewMode by remember { mutableStateOf("analyse") } // "analyse", "raw_en", "raw_fr"
     var showEditDialog by remember { mutableStateOf(false) }
+    var pendingPickLang by remember { mutableStateOf(CvLanguage.EN) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let { onImportCv(it) }
+        uri?.let { onImportCvForLang(it, pendingPickLang) }
     }
 
-    val hasRealCv = profile.parsedAt > 0L && (profile.rawCvContent.isNotBlank() || profile.fullName.isNotBlank())
-    val dateFormat = SimpleDateFormat("dd/MM/yyyy à HH:mm", Locale.getDefault())
+    fun launchPicker(lang: CvLanguage) {
+        pendingPickLang = lang
+        filePickerLauncher.launch(
+            arrayOf(
+                "application/pdf",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/msword"
+            )
+        )
+    }
+
+    val hasRealCv = profile.parsedAt > 0L && (profile.combinedSearchCorpus().isNotBlank() || profile.fullName.isNotBlank())
+    val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Palette.background)
             .padding(horizontal = 16.dp)
             .verticalScroll(rememberScrollState())
     ) {
         Spacer(Modifier.height(16.dp))
 
-        // Hero Card (Import & Header)
+        // Hero Header Card
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .glassCard()
-                .padding(20.dp)
+                .padding(18.dp)
         ) {
             Column {
                 Row(
@@ -120,25 +136,26 @@ fun CvScreen(
                             imageVector = Icons.Default.Description,
                             contentDescription = null,
                             tint = Palette.emeraldAccent,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "MON CV (100% RÉEL)",
+                            text = "MES CV (ANGLAIS & FRANÇAIS)",
                             style = Type.mono.bold,
                             color = Palette.emeraldAccent
                         )
                     }
 
                     if (hasRealCv) {
+                        val activeSlots = listOfNotNull(profile.englishCv, profile.frenchCv).size
                         Box(
                             modifier = Modifier
-                                .background(Palette.emeraldAccent.copy(alpha = 0.16f), Capsule())
-                                .border(0.5.dp, Palette.emeraldAccent.copy(alpha = 0.4f), Capsule())
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .background(Palette.emeraldAccent.copy(alpha = 0.14f), Capsule())
+                                .border(0.75.dp, Palette.emeraldAccent.copy(alpha = 0.45f), Capsule())
+                                .padding(horizontal = 9.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "Actif & Analysé",
+                                text = "$activeSlots/2 Actif(s)",
                                 style = Type.label.bold,
                                 color = Palette.emeraldAccent
                             )
@@ -147,67 +164,75 @@ fun CvScreen(
                 }
 
                 Spacer(Modifier.height(8.dp))
-
                 Text(
-                    text = "Importez votre document original (PDF ou Word .docx). Toutes les compétences et expériences sont extraites directement sans aucune donnée fictive.",
+                    text = "Importez vos CV originaux en Anglais et/ou Français. L'application combine les deux pour maximiser le Radar (Algérie, Golfe & Monde) et joint automatiquement le CV dans la langue de l'offre.",
                     style = Type.bodySmall,
                     color = Palette.secondary
                 )
 
-                Spacer(Modifier.height(14.dp))
-
-                Button(
-                    onClick = {
-                        filePickerLauncher.launch(
-                            arrayOf(
-                                "application/pdf",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                "application/msword"
-                            )
-                        )
-                    },
-                    enabled = !isAnalyzingCv,
-                    shape = Capsule(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Palette.emeraldAccent,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isAnalyzingCv) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text(text = "Analyse IA du CV en cours...", style = Type.body.semibold)
-                    } else {
-                        Icon(imageVector = Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = if (hasRealCv) "Remplacer le CV (Nouveau fichier)" else "Importer mon CV (PDF / Word .docx)",
-                            style = Type.body.semibold
-                        )
-                    }
-                }
-
-                if (hasRealCv && !isAnalyzingCv) {
-                    Spacer(Modifier.height(8.dp))
-                    Button(
+                if (hasRealCv) {
+                    Spacer(Modifier.height(12.dp))
+                    GlassSoftButton(
+                        text = if (isAnalyzingCv) "Analyse IA en cours..." else "Ré-analyser avec l'IA Gratuite",
+                        icon = Icons.Default.AutoAwesome,
+                        accentColor = Palette.electricBlue,
+                        enabled = !isAnalyzingCv,
+                        isLoading = isAnalyzingCv,
                         onClick = onReanalyzeWithAi,
-                        shape = Capsule(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Palette.electricBlue.copy(alpha = 0.16f),
-                            contentColor = Palette.electricBlue
-                        ),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(text = "Ré-analyser avec l'IA Gratuite", style = Type.label.bold)
-                    }
+                    )
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
+
+        // Dual CV Cards: English + French with uniform Import / View / Delete actions
+        CvLanguageSlotCard(
+            title = "🇬🇧 CV ANGLAIS (Golfe / International / Tech)",
+            slot = profile.englishCv,
+            isModifiedGlobal = profile.isModifiedCv,
+            dateFormat = dateFormat,
+            isAnalyzing = isAnalyzingCv,
+            onImportClick = { launchPicker(CvLanguage.EN) },
+            onViewClick = {
+                val path = profile.englishCv?.filePath.orEmpty()
+                if (path.isNotBlank() && File(path).exists()) {
+                    onViewCvForLang(CvLanguage.EN)
+                } else {
+                    selectedViewMode = "raw_en"
+                }
+            },
+            onDeleteClick = {
+                if (selectedViewMode == "raw_en") selectedViewMode = "analyse"
+                onDeleteCvForLang(CvLanguage.EN)
+            }
+        )
+
+        Spacer(Modifier.height(10.dp))
+
+        CvLanguageSlotCard(
+            title = "🇫🇷 CV FRANÇAIS (Algérie / Europe / Admin)",
+            slot = profile.frenchCv,
+            isModifiedGlobal = profile.isModifiedCv,
+            dateFormat = dateFormat,
+            isAnalyzing = isAnalyzingCv,
+            onImportClick = { launchPicker(CvLanguage.FR) },
+            onViewClick = {
+                val path = profile.frenchCv?.filePath.orEmpty()
+                if (path.isNotBlank() && File(path).exists()) {
+                    onViewCvForLang(CvLanguage.FR)
+                } else {
+                    selectedViewMode = "raw_fr"
+                }
+            },
+            onDeleteClick = {
+                if (selectedViewMode == "raw_fr") selectedViewMode = "analyse"
+                onDeleteCvForLang(CvLanguage.FR)
+            }
+        )
+
+        Spacer(Modifier.height(14.dp))
 
         if (!hasRealCv) {
             // Empty State
@@ -215,7 +240,7 @@ fun CvScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .glassCard()
-                    .padding(32.dp),
+                    .padding(28.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -223,138 +248,96 @@ fun CvScreen(
                         imageVector = Icons.Default.Analytics,
                         contentDescription = null,
                         tint = Palette.secondary,
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(38.dp)
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        text = "Aucun CV chargé pour le moment",
+                        text = "Aucun CV importé pour le moment",
                         style = Type.body.bold,
                         color = Palette.text
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "Importez votre fichier pour visualiser l'extraction réelle de votre profil.",
+                        text = "Importez votre CV Anglais et/ou Français ci-dessus.",
                         style = Type.bodySmall,
                         color = Palette.secondary
                     )
                 }
             }
         } else {
-            // Document File Details Card
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .glassCard()
-                    .padding(16.dp)
+            // Mode Switcher Bar (Analyse vs Texte EN vs Texte FR)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = profile.sourceCvFileName.ifBlank { "Document CV" },
-                                style = Type.titleMedium.bold,
-                                color = Palette.text
+                GlassFilterChip(
+                    text = "Profil Analysé",
+                    selected = selectedViewMode == "analyse",
+                    onClick = { selectedViewMode = "analyse" },
+                    modifier = Modifier.weight(1f)
+                )
+                if (profile.englishCv != null) {
+                    GlassFilterChip(
+                        text = "Texte EN",
+                        selected = selectedViewMode == "raw_en",
+                        onClick = { selectedViewMode = "raw_en" },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (profile.frenchCv != null) {
+                    GlassFilterChip(
+                        text = "Texte FR",
+                        selected = selectedViewMode == "raw_fr",
+                        onClick = { selectedViewMode = "raw_fr" },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            if (profile.isModifiedCv) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .glassCard()
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "✏️ Profil modifié — la version modifiée sera jointe.",
+                        style = Type.label.bold,
+                        color = Palette.electricBlue,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = {
+                            onSaveProfile(
+                                profile.copy(
+                                    isModifiedCv = false,
+                                    englishCv = profile.englishCv?.copy(isModified = false),
+                                    frenchCv = profile.frenchCv?.copy(isModified = false)
+                                )
                             )
-                            Text(
-                                text = "Analysé le ${dateFormat.format(Date(profile.parsedAt))}",
-                                style = Type.label.monospaced,
-                                color = Palette.secondary
-                            )
                         }
-
-                        Box(
-                            modifier = Modifier
-                                .background(Palette.electricBlue.copy(alpha = 0.16f), Capsule())
-                                .border(0.5.dp, Palette.electricBlue.copy(alpha = 0.4f), Capsule())
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = profile.sourceCvFormat,
-                                style = Type.label.bold.monospaced,
-                                color = Palette.electricBlue
-                            )
-                        }
-                    }
-
-                    val hasOriginalFile = profile.sourceCvPath.isNotBlank() && File(profile.sourceCvPath).exists()
-                    Spacer(Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = when {
-                                profile.isModifiedCv -> "✏️ Modifié manuellement (la version modifiée sera jointe)"
-                                hasOriginalFile -> "✓ Fichier original intact sauvegardé pour l'envoi"
-                                else -> "⚠️ Ré-importez votre CV pour joindre le fichier original intact"
-                            },
-                            style = Type.label,
-                            color = when {
-                                profile.isModifiedCv -> Palette.electricBlue
-                                hasOriginalFile -> Palette.emeraldAccent
-                                else -> Palette.attention
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (profile.isModifiedCv && hasOriginalFile) {
-                            TextButton(
-                                onClick = { onSaveProfile(profile.copy(isModifiedCv = false)) }
-                            ) {
-                                Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Original", style = Type.label.bold)
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-
-                    // Mode Switcher Tabs
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .glass(Capsule(), style = GlassStyle.Clear)
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Button(
-                            onClick = { selectedViewMode = "analyse" },
-                            shape = Capsule(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selectedViewMode == "analyse") Palette.emeraldAccent else Color.Transparent,
-                                contentColor = if (selectedViewMode == "analyse") Color.White else Palette.secondary
-                            ),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(text = "Compétences & Profil", style = Type.label.bold)
-                        }
-
-                        Button(
-                            onClick = { selectedViewMode = "raw_text" },
-                            shape = Capsule(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selectedViewMode == "raw_text") Palette.emeraldAccent else Color.Transparent,
-                                contentColor = if (selectedViewMode == "raw_text") Color.White else Palette.secondary
-                            ),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(text = "Texte Intégral du CV", style = Type.label.bold)
-                        }
+                        Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Original", style = Type.label.bold)
                     }
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
 
-            if (selectedViewMode == "raw_text") {
-                // Raw Extracted CV Document Display
+            if (selectedViewMode == "raw_en" || selectedViewMode == "raw_fr") {
+                val chosenRaw = if (selectedViewMode == "raw_en") {
+                    profile.englishCv?.rawText ?: profile.rawCvContent
+                } else {
+                    profile.frenchCv?.rawText ?: profile.rawCvContent
+                }
                 Text(
-                    text = "CONTENU INTÉGRAL EXTRAIT DU DOCUMENT",
+                    text = if (selectedViewMode == "raw_en") "TEXTE EXTRAIT — CV ANGLAIS" else "TEXTE EXTRAIT — CV FRANÇAIS",
                     style = Type.mono.bold,
                     color = Palette.secondary
                 )
@@ -369,14 +352,11 @@ fun CvScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(
-                                if (dark) Color(0x33000000) else Color(0x10000000),
-                                RoundedRectangle(12.dp)
-                            )
+                            .background(Palette.plateBackground, RoundedRectangle(12.dp))
                             .padding(14.dp)
                     ) {
                         Text(
-                            text = profile.rawCvContent.ifBlank { "Aucun contenu textuel brut extrait." },
+                            text = chosenRaw.ifBlank { "Aucun contenu textuel extrait." },
                             style = Type.mono,
                             color = Palette.text
                         )
@@ -698,7 +678,7 @@ fun CvScreen(
 
         AlertDialog(
             onDismissRequest = { showEditDialog = false },
-            containerColor = if (dark) Color(0xFF131823) else Color.White,
+            containerColor = if (dark) Color(0xFF131823) else Color(0xFFF3F7FC),
             title = {
                 Text(
                     text = "Modifier mon CV",
@@ -719,6 +699,7 @@ fun CvScreen(
                         onValueChange = { editedTitle = it },
                         label = { Text("Titre professionnel") },
                         singleLine = true,
+                        colors = glassFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
@@ -728,6 +709,7 @@ fun CvScreen(
                         label = { Text("Résumé / Accroche") },
                         minLines = 3,
                         maxLines = 5,
+                        colors = glassFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
@@ -737,12 +719,16 @@ fun CvScreen(
                         label = { Text("Compétences (séparées par virgule)") },
                         minLines = 2,
                         maxLines = 4,
+                        colors = glassFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
             confirmButton = {
-                Button(
+                GlassSolidButton(
+                    text = "Enregistrer",
+                    containerColor = Palette.emeraldSolidBg,
+                    height = 38.dp,
                     onClick = {
                         val updatedSkills = editedSkills.split(",").map { it.trim() }.filter { it.isNotBlank() }
                         onSaveProfile(
@@ -755,17 +741,130 @@ fun CvScreen(
                             )
                         )
                         showEditDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent, contentColor = Color.White)
-                ) {
-                    Text("Enregistrer (CV Modifié)", style = Type.label.bold)
-                }
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { showEditDialog = false }) {
-                    Text("Annuler", color = Palette.secondary)
+                    Text("Annuler", style = Type.label.bold, color = Palette.secondary)
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun CvLanguageSlotCard(
+    title: String,
+    slot: CvDocumentSlot?,
+    isModifiedGlobal: Boolean,
+    dateFormat: SimpleDateFormat,
+    isAnalyzing: Boolean,
+    onImportClick: () -> Unit,
+    onViewClick: () -> Unit,
+    onDeleteClick: () -> Unit
+) {
+    val hasOriginalFile = slot != null && slot.filePath.isNotBlank() && File(slot.filePath).exists()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassCard()
+            .padding(16.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = Type.bodySmall.bold,
+                    color = Palette.text,
+                    modifier = Modifier.weight(1f)
+                )
+                if (slot != null) {
+                    Box(
+                        modifier = Modifier
+                            .background(Palette.electricBlueSoft, Capsule())
+                            .border(0.5.dp, Palette.electricBlue.copy(alpha = 0.45f), Capsule())
+                            .padding(horizontal = 9.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = slot.format.ifBlank { "PDF" },
+                            style = Type.label.bold.monospaced,
+                            color = Palette.electricBlue
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            if (slot != null) {
+                Text(
+                    text = slot.fileName.ifBlank { "Document importé" },
+                    style = Type.label.bold,
+                    color = Palette.text
+                )
+                Text(
+                    text = when {
+                        slot.isModified || isModifiedGlobal -> "✏️ Version modifiée utilisée · Importé le ${dateFormat.format(Date(slot.parsedAt))}"
+                        hasOriginalFile -> "✓ Original conservé intact · ${dateFormat.format(Date(slot.parsedAt))}"
+                        else -> "⚠️ Ré-importez pour joindre le fichier original intact"
+                    },
+                    style = Type.label,
+                    color = when {
+                        slot.isModified || isModifiedGlobal -> Palette.electricBlue
+                        hasOriginalFile -> Palette.emeraldAccent
+                        else -> Palette.attention
+                    }
+                )
+            } else {
+                Text(
+                    text = "Aucun fichier uploadé pour cette langue.",
+                    style = Type.label,
+                    color = Palette.secondary
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // Uniform 3-button action bar (equal weight & fixed height 38dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                GlassSolidButton(
+                    text = if (slot != null) "Remplacer" else "Importer",
+                    icon = Icons.Default.FolderOpen,
+                    containerColor = Palette.emeraldSolidBg,
+                    enabled = !isAnalyzing,
+                    height = 38.dp,
+                    onClick = onImportClick,
+                    modifier = Modifier.weight(1f)
+                )
+
+                GlassSoftButton(
+                    text = "Voir",
+                    icon = Icons.Default.Visibility,
+                    accentColor = Palette.electricBlue,
+                    enabled = slot != null && !isAnalyzing,
+                    height = 38.dp,
+                    onClick = onViewClick,
+                    modifier = Modifier.weight(1f)
+                )
+
+                GlassSoftButton(
+                    text = "Suppr.",
+                    icon = Icons.Default.DeleteOutline,
+                    accentColor = Palette.danger,
+                    enabled = slot != null && !isAnalyzing,
+                    height = 38.dp,
+                    onClick = onDeleteClick,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
     }
 }
