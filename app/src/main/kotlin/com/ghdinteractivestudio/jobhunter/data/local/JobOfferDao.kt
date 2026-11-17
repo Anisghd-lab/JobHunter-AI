@@ -18,7 +18,7 @@ interface JobOfferDao {
     @Query("SELECT * FROM job_offers WHERE status = :status ORDER BY appliedAt ASC")
     suspend fun getOffersByStatusOnce(status: String): List<JobOfferEntity>
 
-    @Query("SELECT * FROM job_offers WHERE status = 'DETECTED' OR (status = 'ANALYZED' AND aiVerdict != 'NON_ADAPTE' AND matchScore >= 50) ORDER BY CASE WHEN recruiterEmail IS NOT NULL AND recruiterEmail != '' AND recruiterEmail LIKE '%@%' THEN 1 ELSE 0 END DESC, matchScore DESC, detectedAt DESC LIMIT :limit")
+    @Query("SELECT * FROM job_offers WHERE status IN ('DETECTED', 'READY_TO_SEND') OR (status = 'ANALYZED' AND aiVerdict != 'NON_ADAPTE' AND matchScore >= 40) ORDER BY CASE WHEN recruiterEmail IS NOT NULL AND recruiterEmail != '' AND recruiterEmail LIKE '%@%' THEN 1 ELSE 0 END DESC, matchScore DESC, detectedAt DESC LIMIT :limit")
     suspend fun getTopAutoApplyCandidates(limit: Int): List<JobOfferEntity>
 
     @Query("SELECT * FROM job_offers WHERE status IN ('APPLIED', 'INTERVIEW', 'READY_TO_SEND') ORDER BY appliedAt DESC")
@@ -36,8 +36,14 @@ interface JobOfferDao {
     @Query("UPDATE job_offers SET status = 'DETECTED', appliedAt = 0, appliedChannel = '', followUpCount = 0, lastFollowUpAt = 0, lastReplySummary = '', lastReplyFrom = '', lastReplySubject = '', lastReplyAt = 0, lastReplyMessageId = '', autoApplied = 0, lastAutoAttemptAt = 0, generatedLetter = '', tailoredCvPath = '', letterPath = '' WHERE status IN ('ANALYZED', 'READY_TO_SEND', 'APPLIED', 'INTERVIEW', 'REJECTED')")
     suspend fun resetAllPipelineCounters(): Int
 
-    @Query("UPDATE job_offers SET recruiterEmail = '', applicationMethod = 'WEBSITE' WHERE lower(recruiterEmail) LIKE '%accommodations%' OR lower(recruiterEmail) LIKE '%accessibility%' OR lower(recruiterEmail) LIKE '%privacy%' OR lower(recruiterEmail) LIKE '%legal@%' OR lower(recruiterEmail) LIKE '%noreply%'")
+    @Query("UPDATE job_offers SET recruiterEmail = '', applicationMethod = 'WEBSITE' WHERE lower(recruiterEmail) LIKE '%accommodations%' OR lower(recruiterEmail) LIKE '%accessibility%' OR lower(recruiterEmail) LIKE '%accessibleinterviewing%' OR lower(recruiterEmail) LIKE '%privacy%' OR lower(recruiterEmail) LIKE '%legal@%' OR lower(recruiterEmail) LIKE '%noreply%' OR lower(recruiterEmail) LIKE '%tinyboards%' OR lower(recruiterEmail) LIKE '%securityreporting%'")
     suspend fun sanitizeInvalidRecruiterEmails(): Int
+
+    @Query("DELETE FROM job_offers WHERE status = 'DETECTED' AND id NOT IN (SELECT id FROM job_offers WHERE status = 'DETECTED' ORDER BY detectedAt DESC LIMIT 120)")
+    suspend fun trimOldDetectedOffers(): Int
+
+    @Query("UPDATE job_offers SET description = substr(description, 1, 3500) WHERE length(description) > 3500")
+    suspend fun trimLongDescriptions(): Int
 
     @Query("SELECT * FROM job_offers WHERE status != 'DETECTED' ORDER BY appliedAt DESC, detectedAt DESC")
     fun getPipelineOffers(): Flow<List<JobOfferEntity>>

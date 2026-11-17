@@ -149,15 +149,16 @@ class SettingsRepository private constructor(context: Context) {
         }
 
         // Autonomous 50% matching, unpaused SMTP and auto-apply activation
-        if (!prefs.getBoolean("auto_apply_v4_autonomous", false)) {
+        if (!prefs.getBoolean("auto_apply_v5_fix_50", false) || prefs.getInt("auto_apply_min_score", 50) > 50) {
             prefs.edit()
                 .putInt("auto_apply_min_score", 50)
                 .putInt("auto_apply_max_day", 50)
                 .putInt("auto_apply_max_cycle", 12)
                 .putBoolean("auto_apply", true)
+                .putBoolean("agent_247", true)
                 .putBoolean("smtp_auth_paused", false)
                 .putBoolean("prefer_yahoo_app", false)
-                .putBoolean("auto_apply_v4_autonomous", true)
+                .putBoolean("auto_apply_v5_fix_50", true)
                 .apply()
         }
 
@@ -178,7 +179,7 @@ class SettingsRepository private constructor(context: Context) {
             gmailOAuthToken = prefs.getString("gmail_oauth_token", "") ?: "",
             agentActive247 = prefs.getBoolean("agent_247", true),
             autoApplyEnabled = prefs.getBoolean("auto_apply", true),
-            autoApplyMinScore = prefs.getInt("auto_apply_min_score", 50),
+            autoApplyMinScore = minOf(prefs.getInt("auto_apply_min_score", 50), 50),
             adaptCvPerOffer = prefs.getBoolean("adapt_cv_per_offer", false),
             aiAutonomousEmailControl = prefs.getBoolean("ai_auto_email", true),
             autoFollowUpEnabled = prefs.getBoolean("auto_follow_up", true),

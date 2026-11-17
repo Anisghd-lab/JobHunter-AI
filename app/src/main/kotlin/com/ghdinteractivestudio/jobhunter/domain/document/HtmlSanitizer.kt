@@ -63,18 +63,19 @@ object HtmlSanitizer {
             .replace(Regex("\\n[ \\t]+"), "\n")
             .replace(Regex("\\n{3,}"), "\n\n")
             .trim()
+            .take(4000)
     }
 
     private val BLOCKED_EMAIL_TOKENS = listOf(
         "example.com", "noreply", "no-reply", "donotreply", "do-not-reply",
-        "sentry", "accommodation", "accessibility", "reasonable-",
+        "sentry", "accommodation", "accessibility", "accessibleinterviewing@", "reasonable-",
         "privacy", "gdpr", "rgpd", "dpo@", "legal@", "compliance@",
-        "abuse@", "security@", "postmaster@", "mailer-daemon", "webmaster@",
+        "abuse@", "security@", "securityreporting@", "postmaster@", "mailer-daemon", "webmaster@",
         "unsubscribe", "bounce", "notification@", "newsletter", "support@",
         "marketing@", "press@", "media@", "w3.org", "schema.org", "remotive.",
         "jobicy.", "himalayas.", "weworkremotely.", "arbeitnow.", "emploitic.",
         "tanqeeb.", "qatarliving.", "greenhouse.io", "ashbyhq.com", "lever.co",
-        "workday.com", "cloudflare.com"
+        "workday.com", "cloudflare.com", "tinyboards.", "tinyboards.co"
     )
 
     private val HIRING_EMAIL_TOKENS = listOf(

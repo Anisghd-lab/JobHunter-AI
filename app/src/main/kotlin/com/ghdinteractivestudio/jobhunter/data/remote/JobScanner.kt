@@ -1487,11 +1487,16 @@ class JobScanner {
 
         val skillRatio = if (realSkills.isNotEmpty()) (matchedSkills.size.toFloat() / 6f).coerceAtMost(1f) * 50f else 20f
         val titleBonus = (titleMatches.size.coerceAtMost(3) * 10f) + bonusTitleBoost
-        val computedScore = (skillRatio + titleBonus + 16f).toInt().coerceIn(25, 96)
+        var computedScore = (skillRatio + titleBonus + 16f).toInt().coerceIn(25, 96)
+
+        // If offer has a valid direct recruiter email and matches general skills / domain, give a solid baseline of at least 55%
+        if (HtmlSanitizer.isValidRecruiterEmail(offer.recruiterEmail) && combinedMatches.isNotEmpty()) {
+            computedScore = maxOf(computedScore, 55)
+        }
 
         val verdict = when {
-            computedScore >= 60 -> "CONVIENT"
-            computedScore >= 40 -> "MOYEN"
+            computedScore >= 50 -> "CONVIENT"
+            computedScore >= 35 -> "MOYEN"
             else -> "NON_ADAPTE"
         }
 

@@ -76,7 +76,7 @@ object ApplicationAutomationManager {
             return Result.failure(IllegalStateException("Date limite dépassée (${offer.deadlineLabel.ifBlank { "offre expirée" }}) — candidature bloquée."))
         }
 
-        val liveDetails = if (offer.url.startsWith("http")) {
+        val liveDetails = if (offer.recruiterEmail.isBlank() && offer.url.startsWith("http")) {
             scanner.fetchOfferLiveDetails(offer.url)
         } else null
 
@@ -513,6 +513,9 @@ object ApplicationAutomationManager {
     suspend fun purgeDuplicateOffers(context: Context) = withContext(Dispatchers.IO) {
         runCatching {
             val dao = AppDatabase.getInstance(context).jobOfferDao()
+            dao.sanitizeInvalidRecruiterEmails()
+            dao.trimLongDescriptions()
+            dao.trimOldDetectedOffers()
             val allOffers = dao.getAppliedSignatures()
             val seenSignatures = mutableSetOf<String>()
             val seenEmails = mutableSetOf<String>()
@@ -668,13 +671,13 @@ object ApplicationAutomationManager {
             .toMutableSet()
 
         // Re-score non-AI cached rows with latest domain guard so out-of-profile tech/medical titles drop out immediately
-        val minEligibilityScore = (initialSettings.autoApplyMinScore - 15).coerceAtLeast(45)
+        val minEligibilityScore = (initialSettings.autoApplyMinScore - 15).coerceAtLeast(40)
         val rawCandidates = dao.getTopAutoApplyCandidates(limit = 150)
             .map { entity ->
                 val domain = entity.toDomain()
                 if (domain.aiReasoning.isBlank()) scanner.rescoreWithProfile(domain, migratedProfile) else domain
             }
-            .filter { !DeadlineParser.isExpiredOrStale(it, now) && it.matchScore >= minEligibilityScore }
+            .filter { !DeadlineParser.isExpiredOrStale(it, now) && (it.matchScore >= minEligibilityScore || HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail)) }
             .sortedWith(
                 compareByDescending<JobOffer> { HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
                     .thenByDescending { it.matchScore }
@@ -747,16 +750,28 @@ object ApplicationAutomationManager {
                 currentSettings.hasAnyAiKey() &&
                 evaluated.aiReasoning.isBlank()
             ) {
-                evaluated = evaluateOfferWithAi(
-                    context = context,
-                    offer = evaluated,
-                    profile = migratedProfile,
-                    settings = currentSettings,
-                    scanner = scanner
-                ).getOrNull() ?: continue
+                val aiEval = runCatching {
+                    evaluateOfferWithAi(
+                        context = context,
+                        offer = evaluated,
+                        profile = migratedProfile,
+                        settings = currentSettings,
+                        scanner = scanner
+                    ).getOrNull()
+                }.getOrNull()
+                if (aiEval != null) {
+                    evaluated = aiEval
+                }
             }
 
-            if (evaluated.matchScore < currentSettings.autoApplyMinScore ||
+            val effectiveMinScore = minOf(currentSettings.autoApplyMinScore, 50)
+            val passesThreshold = if (hasEmail) {
+                evaluated.matchScore >= 45
+            } else {
+                evaluated.matchScore >= effectiveMinScore
+            }
+
+            if (!passesThreshold ||
                 DeadlineParser.isExpiredOrStale(evaluated, now) ||
                 evaluated.aiVerdict == "NON_ADAPTE"
             ) {

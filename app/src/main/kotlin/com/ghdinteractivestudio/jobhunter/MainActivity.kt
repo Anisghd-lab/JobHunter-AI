@@ -42,6 +42,7 @@ import com.ghdinteractivestudio.jobhunter.domain.model.CvLanguage
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
 import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
 import com.ghdinteractivestudio.jobhunter.domain.model.UserProfile
+import com.ghdinteractivestudio.jobhunter.service.JobHunterForegroundService
 import com.ghdinteractivestudio.jobhunter.ui.components.GlassTabBar
 import com.ghdinteractivestudio.jobhunter.ui.components.LiquidGlassBackdrop
 import com.ghdinteractivestudio.jobhunter.ui.screens.AgentScreen
@@ -91,6 +92,10 @@ class MainActivity : ComponentActivity() {
         val offerDao = db.jobOfferDao()
         val profileDao = db.userProfileDao()
         val settingsRepo = SettingsRepository.getInstance(this)
+
+        if (settingsRepo.settings.value.agentActive247 || settingsRepo.settings.value.autoApplyEnabled) {
+            runCatching { JobHunterForegroundService.startService(this) }
+        }
 
         lifecycleScope.launch(Dispatchers.IO) {
             ApplicationAutomationManager.purgeDuplicateOffers(this@MainActivity)
@@ -498,6 +503,18 @@ class MainActivity : ComponentActivity() {
             if (offers.isNotEmpty()) {
                 ApplicationAutomationManager.preserveEnrichmentsAndReplaceDetected(this@MainActivity, offers)
                 settingsRepo.update { it.copy(lastScanTimestamp = System.currentTimeMillis()) }
+
+                // Automatically trigger autonomous quota-guarded auto-apply batch if enabled
+                val currentSettings = settingsRepo.settings.value
+                if (profile != null && (currentSettings.autoApplyEnabled || currentSettings.agentActive247)) {
+                    ApplicationAutomationManager.runAutonomousAutoApplyBatch(
+                        context = this@MainActivity,
+                        profile = profile,
+                        settingsRepo = settingsRepo,
+                        scanner = scanner,
+                        forceRun = false
+                    )
+                }
             }
             if (showToast) {
                 withContext(Dispatchers.Main) {

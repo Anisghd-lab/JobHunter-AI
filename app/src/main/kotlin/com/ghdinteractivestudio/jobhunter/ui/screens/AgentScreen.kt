@@ -204,7 +204,7 @@ fun AgentScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf(50, 60, 70, 80).forEach { threshold ->
+                    listOf(45, 50, 60, 70).forEach { threshold ->
                         GlassFilterChip(
                             text = "$threshold%",
                             selected = settings.autoApplyMinScore == threshold,
