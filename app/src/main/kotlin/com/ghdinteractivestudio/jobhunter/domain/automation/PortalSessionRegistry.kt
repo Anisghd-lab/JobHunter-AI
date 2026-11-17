@@ -1,10 +1,12 @@
 package com.ghdinteractivestudio.jobhunter.domain.automation
 
+import android.util.Base64
 import android.webkit.CookieManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 data class JobPortalAccount(
@@ -59,7 +61,7 @@ object PortalSessionRegistry {
             loginUrl = "https://www.qatarliving.com/en/jobs",
             signupUrl = "https://www.qatarliving.com/en/jobs",
             checkUrl = "https://www.qatarliving.com/en/jobs",
-            authCookieHints = listOf("ssess", "sess", "ql_", "token", "auth", "session")
+            authCookieHints = listOf("qat", "qat_refresh", "ssess", "sess", "ql_", "token", "auth", "session")
         )
     )
 
@@ -93,6 +95,9 @@ object PortalSessionRegistry {
             )
         }
 
+        val cookieMap = rawCookies.associate { pair ->
+            pair.substringBefore("=").trim().lowercase() to pair.substringAfter("=").trim()
+        }
         val cookieHeader = rawCookies.joinToString("; ")
         val hasLikelyAuthCookie = rawCookies.any { pair ->
             val name = pair.substringBefore("=").lowercase()
@@ -122,6 +127,16 @@ object PortalSessionRegistry {
                         val hasLoggedInDom = body.contains("déconnexion") || body.contains("mon profil") || body.contains("mes candidatures")
                         hasLikelyAuthCookie && (hasLoggedInDom || rawCookies.any { it.lowercase().contains("keycloak_identity") || it.lowercase().contains("next-auth.session") })
                     }
+                    "qatarliving" -> {
+                        // QatarLiving Next.js SPA stores auth in qat (JWT access token) & qat_refresh Http cookies
+                        val qatToken = cookieMap["qat"].orEmpty()
+                        val qatRefresh = cookieMap["qat_refresh"].orEmpty()
+                        val validJwtSession = qatToken.length >= 40 && isJwtActive(qatToken) && qatRefresh.length >= 20
+                        val hasDomSignInSuccess = (resp.isSuccessful || resp.code in 300..399) &&
+                            !location.contains("login") &&
+                            (body.contains("logout") || body.contains("sign out") || body.contains("qlnext_user"))
+                        (resp.isSuccessful && validJwtSession) || (hasLikelyAuthCookie && hasDomSignInSuccess)
+                    }
                     else -> {
                         val hasLoggedInDom = body.contains("logout") || body.contains("sign out") || body.contains("my account")
                         hasLikelyAuthCookie && hasLoggedInDom
@@ -145,5 +160,15 @@ object PortalSessionRegistry {
                 message = "✗ Non connecté sur ${portal.name}$suffix — touchez « Créer / Connecter », connectez-vous et validez le CAPTCHA."
             )
         }
+    }
+
+    private fun isJwtActive(token: String): Boolean {
+        val parts = token.split(".")
+        if (parts.size != 3) return token.length >= 40
+        return runCatching {
+            val payloadBytes = Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+            val expSec = JSONObject(String(payloadBytes, Charsets.UTF_8)).optLong("exp", 0L)
+            expSec == 0L || (expSec * 1000L) > System.currentTimeMillis()
+        }.getOrDefault(true)
     }
 }

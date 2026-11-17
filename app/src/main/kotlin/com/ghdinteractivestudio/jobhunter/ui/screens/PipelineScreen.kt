@@ -609,6 +609,7 @@ fun ApplicationTrackingCard(
                         text = when {
                             isExpired -> "Expirée"
                             app.status == JobStatus.ANALYZED -> "Générer"
+                            app.recruiterEmail.isBlank() -> "Postuler Web"
                             else -> "Envoyer"
                         },
                         icon = Icons.AutoMirrored.Filled.Send,

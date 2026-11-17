@@ -255,7 +255,7 @@ RÈGLES ABSOLUES :
 1. LANGUE UNIQUE : Rédige 100 % en FRANÇAIS PROFESSIONNEL naturel. Traduis impérativement en français tout intitulé ou compétence du profil formulé en anglais. INTERDICTION STRICTE de laisser la moindre phrase ou expression en anglais.
 2. NE RÉCITE JAMAIS TOUT LE CV : cite UNIQUEMENT les compétences, l'expérience et la formation ciblées ci-dessous qui répondent directement au poste "${offer.title}".
 3. Pas d'ouverture robotique « Je suis [Nom] » (le nom figure déjà en en-tête et en signature).
-4. Concision & impact (2 à 4 phrases fluides par paragraphe, ~40 à 60 mots, format 1 page A4) :
+4. Concision & impact (2 à 4 phrases fluides par paragraphe, ~40 à 60 mots, format 1 page A4, SANS écrire « Candidature spontanée » car il s'agit d'une offre publiée, SANS crochets `[...]` ni astérisques `*...*`) :
    - "paragraphPresentAndRequest" : Accroche directe reliant le profil ciblé à la candidature pour "${offer.title}" chez ${offer.company}.
    - "paragraphExpectationsAndCompany" : Intérêt concret pour ${offer.company} / les enjeux du poste et la valeur ajoutée apportée.
    - "paragraphSelfValorization" : Mise en valeur UNIQUEMENT des compétences visées par l'offre ($skillsPrompt) appuyée par l'expérience pertinente${if (certPrompt.isNotBlank()) " et la certification utile" else ""}.
@@ -296,7 +296,7 @@ STRICT NON-NEGOTIABLE RULES:
 1. SINGLE LANGUAGE ONLY: Write 100% in natural professional ENGLISH ONLY. If any detail from the candidate context below appears in French, translate it smoothly into natural English. NEVER leave any French sentence, connector, or greeting anywhere in the JSON.
 2. NEVER DUMP THE WHOLE CV: cite ONLY the pre-selected relevant skills, experience, and credentials below that directly answer "${offer.title}". Zero fabricated facts.
 3. Avoid robotic openings like "My name is..." (your name is already in the header and signature).
-4. Crisp executive pace (2 to 4 fluent sentences per paragraph, ~40 to 60 words each, fitting cleanly on 1 A4 page):
+4. Crisp executive pace (2 to 4 fluent sentences per paragraph, ~40 to 60 words each, fitting cleanly on 1 A4 page, NEVER use brackets `[...]` or markdown `*...*`):
    - "paragraphPresentAndRequest": Direct opening connecting the targeted background to your application for "${offer.title}" at ${offer.company}.
    - "paragraphExpectationsAndCompany": Genuine alignment with ${offer.company}, its goals, and the key responsibilities of the role.
    - "paragraphSelfValorization": Concrete evidence highlighting ONLY the targeted competencies ($skillsPrompt) backed by relevant experience${if (certPrompt.isNotBlank()) " and relevant certification" else ""}.
@@ -839,6 +839,8 @@ ${listOfNotNull(profile.phone.ifBlank { null }, profile.email.ifBlank { null }).
         var text = raw
             .replace("**", "")
             .replace("__", "")
+            .replace(Regex("""\*([^*]+)\*"""), "$1")
+            .replace(Regex("""\[([^\]\n]{2,60})\]"""), "$1")
             .replace(" — ", ", ")
             .replace("—", ", ")
             .replace(" – ", ", ")

@@ -18,7 +18,7 @@ interface JobOfferDao {
     @Query("SELECT * FROM job_offers WHERE status = :status ORDER BY appliedAt ASC")
     suspend fun getOffersByStatusOnce(status: String): List<JobOfferEntity>
 
-    @Query("SELECT * FROM job_offers WHERE status IN ('DETECTED', 'ANALYZED') ORDER BY matchScore DESC, detectedAt DESC LIMIT :limit")
+    @Query("SELECT * FROM job_offers WHERE status = 'DETECTED' OR (status = 'ANALYZED' AND aiVerdict != 'NON_ADAPTE' AND matchScore >= 50) ORDER BY matchScore DESC, detectedAt DESC LIMIT :limit")
     suspend fun getTopAutoApplyCandidates(limit: Int): List<JobOfferEntity>
 
     @Query("SELECT * FROM job_offers WHERE status IN ('APPLIED', 'INTERVIEW', 'READY_TO_SEND') ORDER BY appliedAt DESC")
