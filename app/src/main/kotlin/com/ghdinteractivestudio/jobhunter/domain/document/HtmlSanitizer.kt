@@ -71,19 +71,49 @@ object HtmlSanitizer {
         "privacy", "gdpr", "rgpd", "dpo@", "legal@", "compliance@",
         "abuse@", "security@", "postmaster@", "mailer-daemon", "webmaster@",
         "unsubscribe", "bounce", "notification@", "newsletter", "support@",
-        "marketing@", "press@", "media@", "remotive.", "jobicy.", "himalayas.",
-        "weworkremotely.", "arbeitnow.", "emploitic.", "tanqeeb.", "qatarliving.",
-        "greenhouse.io", "ashbyhq.com", "lever.co", "workday.com"
+        "marketing@", "press@", "media@", "w3.org", "schema.org", "remotive.",
+        "jobicy.", "himalayas.", "weworkremotely.", "arbeitnow.", "emploitic.",
+        "tanqeeb.", "qatarliving.", "greenhouse.io", "ashbyhq.com", "lever.co",
+        "workday.com", "cloudflare.com"
     )
 
     private val HIRING_EMAIL_TOKENS = listOf(
-        "recruit", "hiring", "talent", "career", "jobs", "hr", "rh",
-        "candidat", "cv", "apply", "people", "staffing"
+        "recrutement", "recrute", "recruteur", "recrut", "candidat", "candidature",
+        "candidatures", "drh", "rh", "embauche", "emploi", "emplois", "carriere", "carrieres",
+        "postuler", "recruit", "recruiting", "recruitment", "hiring", "hire",
+        "talent", "talents", "career", "careers", "jobs", "job", "apply", "hr",
+        "people", "staffing"
     )
+
+    fun decodeCloudflareEmail(hex: String): String {
+        if (hex.length < 4 || hex.length % 2 != 0) return ""
+        return runCatching {
+            val r = hex.substring(0, 2).toInt(16)
+            val sb = StringBuilder()
+            for (i in 2 until hex.length step 2) {
+                val c = hex.substring(i, i + 2).toInt(16) xor r
+                sb.append(c.toChar())
+            }
+            sb.toString().trim()
+        }.getOrDefault("")
+    }
+
+    fun unmaskObfuscatedEmails(raw: String): String {
+        return raw
+            .replace("&#64;", "@")
+            .replace("&commat;", "@")
+            .replace(Regex("""(?i)\s*\[at\]\s*"""), "@")
+            .replace(Regex("""(?i)\s*\(at\)\s*"""), "@")
+            .replace(Regex("""(?i)\s*\[chez\]\s*"""), "@")
+            .replace(Regex("""(?i)\s*\[dot\]\s*"""), ".")
+            .replace(Regex("""(?i)\s*\(dot\)\s*"""), ".")
+    }
 
     fun isValidRecruiterEmail(email: String): Boolean {
         val clean = email.trim().lowercase()
         if (clean.length < 6 || !clean.contains("@")) return false
+        val domain = clean.substringAfter("@")
+        if (!domain.contains(".") || domain.startsWith(".") || domain.endsWith(".")) return false
         if (clean.endsWith(".png") || clean.endsWith(".jpg") || clean.endsWith(".jpeg") ||
             clean.endsWith(".gif") || clean.endsWith(".svg") || clean.endsWith(".webp") ||
             clean.endsWith(".css") || clean.endsWith(".js")
@@ -92,17 +122,39 @@ object HtmlSanitizer {
     }
 
     fun extractRecruiterEmail(text: String): String {
+        val candidates = mutableListOf<String>()
+
+        // 1. Cloudflare obfuscated emails: data-cfemail="6a090b..."
+        val cfPattern = Regex("""data-cfemail="([0-9a-fA-F]{4,})"""")
+        cfPattern.findAll(text).forEach { m ->
+            val decoded = decodeCloudflareEmail(m.groupValues[1])
+            if (isValidRecruiterEmail(decoded)) candidates.add(decoded)
+        }
+
+        // 2. Mailto URLs
+        val mailtoPattern = Regex("""mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})""", RegexOption.IGNORE_CASE)
+        mailtoPattern.findAll(text).forEach { m ->
+            val e = m.groupValues[1].trim()
+            if (isValidRecruiterEmail(e)) candidates.add(e)
+        }
+
+        // 3. Unmasked body text
+        val unmasked = unmaskObfuscatedEmails(text)
         val emailRegex = Regex("""[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}""")
-        return emailRegex.findAll(text)
-            .map { it.value.trim() }
+        emailRegex.findAll(unmasked).forEach { m ->
+            val e = m.value.trim()
+            if (isValidRecruiterEmail(e)) candidates.add(e)
+        }
+
+        return candidates
             .filter { isValidRecruiterEmail(it) }
             .distinctBy { it.lowercase() }
             .maxByOrNull { email ->
                 val lower = email.lowercase()
                 when {
                     HIRING_EMAIL_TOKENS.any { lower.contains(it) } -> 100
-                    lower.startsWith("info@") || lower.startsWith("contact@") -> 20
-                    else -> 50
+                    lower.startsWith("info@") || lower.startsWith("contact@") || lower.startsWith("admin@") -> 50
+                    else -> 30
                 }
             } ?: ""
     }

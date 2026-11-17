@@ -66,16 +66,62 @@ class JobScanner {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
-     * Scans live web boards for Algeria (national), Gulf/GCC (UAE, KSA, Qatar, Kuwait, Oman, Bahrain),
-     * and International (worldwide/remote/on-site), leveraging BOTH English & French CV profiles when loaded.
+     * Scans live web boards and official company career portals with PRIORITIZATION:
+     * - PRIORITÉ 1 : Sites Officiels Recruteurs & Entreprises Directes (Emails Recruteurs directs)
+     *   - WeWorkRemotely direct company feeds (Customer Support, Management, Administration, Tech, All Other)
+     *   - Tanqeeb Multi-Pays Direct Recruiter Scraper (Algérie, UAE, Saudi Arabia, Kuwait, Qatar)
+     *   - Jobicy Multi-Category Direct Employer API (Support, Admin, Management, Marketing, Operations, Finance)
+     *   - Remotive & RemoteOK direct company feeds
+     *   - Emploitic DZ Deep Scan (National Algérie)
+     * - PRIORITÉ 2 : Plateformes Tiers & Portails Web (Dossiers Web assistés & backup)
+     *   - QatarLiving, Gulf Tech ATS (Careem, Tamara, LeanTech), Arbeitnow, Himalayas
+     * - All offers with direct recruiter emails are strictly ranked at the TOP of the Radar.
      */
     suspend fun scanOffers(profile: UserProfile? = null): List<JobOffer> = withContext(Dispatchers.IO) {
         val searchTerms = deriveSearchKeywords(profile)
-        Log.d(TAG, "Starting real web job scan with dual EN/FR profile terms: $searchTerms")
+        Log.d(TAG, "Starting direct company & recruiter job scan with dual EN/FR profile: $searchTerms")
 
         val allOffers = mutableListOf<JobOffer>()
 
-        // 1. NATIONAL ALGÉRIE — Emploitic DZ (Présentiel, Hybride, CDI/CDD en Algérie)
+        // =========================================================================
+        // PRIORITÉ 1 : SITES OFFICIELS RECRUTEURS & ENTREPRISES DIRECTES (Email Ready)
+        // =========================================================================
+
+        // 1.1 Direct Company Feeds — WeWorkRemotely Multi-Category (40+ emails recruteurs directs)
+        runCatching {
+            allOffers.addAll(fetchWeWorkRemotelyRss(searchTerms))
+        }.onFailure {
+            Log.w(TAG, "WWR Direct Company error: ${it.message}")
+        }
+
+        // 1.2 Multi-Pays Direct Recruiter Scraper — Tanqeeb Algérie, UAE, Saudi, Kuwait, Qatar
+        runCatching {
+            allOffers.addAll(fetchTanqeebGccJobs(profile, searchTerms))
+        }.onFailure {
+            Log.w(TAG, "Tanqeeb Direct Recruiter error: ${it.message}")
+        }
+
+        // 1.3 Direct Employer Category API — Jobicy (Support, Admin, Management, Marketing, Finance)
+        runCatching {
+            allOffers.addAll(fetchJobicyJobs(searchTerms))
+        }.onFailure {
+            Log.w(TAG, "Jobicy Direct Employer error: ${it.message}")
+        }
+
+        // 1.4 Direct Employer Feeds — Remotive & RemoteOK
+        runCatching {
+            allOffers.addAll(fetchRemotiveJobs(searchTerms))
+        }.onFailure {
+            Log.w(TAG, "Remotive error: ${it.message}")
+        }
+
+        runCatching {
+            allOffers.addAll(fetchRemoteOkJobs(searchTerms))
+        }.onFailure {
+            Log.w(TAG, "RemoteOK error: ${it.message}")
+        }
+
+        // 1.5 National Algérie Deep Scan — Emploitic DZ (Présentiel, Hybride, CDI/CDD)
         val dzQueries = deriveAlgeriaQueries(profile)
         for (q in dzQueries) {
             runCatching {
@@ -85,12 +131,9 @@ class JobScanner {
             }
         }
 
-        // 2. GOLFE / GCC (UAE, Arabie Saoudite, Qatar, Koweït, Oman, Bahreïn)
-        runCatching {
-            allOffers.addAll(fetchTanqeebGccJobs(profile, searchTerms))
-        }.onFailure {
-            Log.w(TAG, "Tanqeeb GCC error: ${it.message}")
-        }
+        // =========================================================================
+        // PRIORITÉ 2 : PLATEFORMES TIERS & PORTAILS WEB (Dossiers Web & Backup)
+        // =========================================================================
 
         runCatching {
             allOffers.addAll(fetchQatarLivingJobs(searchTerms))
@@ -116,48 +159,20 @@ class JobScanner {
             Log.w(TAG, "LeanTech Gulf error: ${it.message}")
         }
 
-        // 3. INTERNATIONAL ON-SITE & REMOTE (Europe / Visa / Global) — Arbeitnow API
         runCatching {
             allOffers.addAll(fetchArbeitnowJobs(searchTerms))
         }.onFailure {
             Log.w(TAG, "Arbeitnow error: ${it.message}")
         }
 
-        // 4. INTERNATIONAL REMOTE — Remotive API (HR, Admin, Operations, Education, Software, All)
-        runCatching {
-            allOffers.addAll(fetchRemotiveJobs(searchTerms))
-        }.onFailure {
-            Log.w(TAG, "Remotive error: ${it.message}")
-        }
-
-        // 5. INTERNATIONAL REMOTE — Jobicy API
-        runCatching {
-            allOffers.addAll(fetchJobicyJobs(searchTerms))
-        }.onFailure {
-            Log.w(TAG, "Jobicy error: ${it.message}")
-        }
-
-        // 6. INTERNATIONAL REMOTE — Himalayas API
         runCatching {
             allOffers.addAll(fetchHimalayasJobs(searchTerms))
         }.onFailure {
             Log.w(TAG, "Himalayas error: ${it.message}")
         }
 
-        // 7. INTERNATIONAL REMOTE — RemoteOK API & WeWorkRemotely RSS
-        runCatching {
-            allOffers.addAll(fetchRemoteOkJobs(searchTerms))
-        }.onFailure {
-            Log.w(TAG, "RemoteOK error: ${it.message}")
-        }
-
-        runCatching {
-            allOffers.addAll(fetchWeWorkRemotelyRss(searchTerms))
-        }.onFailure {
-            Log.w(TAG, "WWR error: ${it.message}")
-        }
-
-        // Deduplicate, enforce strict active deadline & age compliance, normalize Gulf scope, and score deterministically
+        // Deduplicate, enforce strict active deadline & age compliance, normalize Gulf scope,
+        // and sort DETERMINISTICALLY: Offers with verified direct recruiter emails ALWAYS come FIRST
         val now = System.currentTimeMillis()
         val distinct = allOffers
             .filter {
@@ -173,15 +188,44 @@ class JobScanner {
                 } else offer
                 scoreWithCvDeterministically(normalizedScope, profile)
             }
-            .sortedWith(compareByDescending<JobOffer> { it.matchScore }.thenByDescending { it.publishedAt }.thenByDescending { it.detectedAt })
+            .sortedWith(
+                compareByDescending<JobOffer> { HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
+                    .thenByDescending { it.matchScore }
+                    .thenByDescending { it.publishedAt }
+                    .thenByDescending { it.detectedAt }
+            )
 
-        Log.d(TAG, "Scan complete. Total active non-expired real offers collected: ${distinct.size}")
+        Log.d(TAG, "Scan complete. Total active non-expired real offers: ${distinct.size} (${distinct.count { it.recruiterEmail.isNotBlank() }} direct emails)")
         distinct
     }
 
     /**
+     * Crawls an official company career / contact website to discover direct HR / recruiter email.
+     */
+    fun crawlCompanyCareerWebsite(baseUrl: String): String {
+        val cleanBase = baseUrl.trimEnd('/')
+        if (!cleanBase.startsWith("http")) return ""
+        val paths = listOf("/contact", "/recrutement", "/careers", "/jobs", "/carrieres", "")
+        for (p in paths) {
+            val target = if (p.isEmpty()) cleanBase else "$cleanBase$p"
+            runCatching {
+                val req = Request.Builder().url(target).header("User-Agent", UA).build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val bodyHtml = resp.body?.string() ?: return@use
+                    val em = HtmlSanitizer.extractRecruiterEmail(bodyHtml)
+                    if (HtmlSanitizer.isValidRecruiterEmail(em)) {
+                        return em
+                    }
+                }
+            }
+        }
+        return ""
+    }
+
+    /**
      * Fetches the live offer detail page to verify it is NOT expired (404/410, validThrough, or "Offre expirée"),
-     * parse any detail-only deadline, and extract any recruiter contact email.
+     * parse any detail-only deadline, and extract any recruiter contact email (including company site deep crawl).
      */
     suspend fun fetchOfferLiveDetails(url: String): LiveOfferDetails = withContext(Dispatchers.IO) {
         if (!url.startsWith("http")) return@withContext LiveOfferDetails()
@@ -193,22 +237,36 @@ class JobScanner {
                 }
                 if (!resp.isSuccessful) return@use LiveOfferDetails()
 
-                val html = resp.body?.string() ?: return@use LiveOfferDetails()
+                val rawHtml = resp.body?.string() ?: return@use LiveOfferDetails()
 
                 // Check JSON-LD "validThrough"
                 val validThroughRaw = Regex(""""validThrough"\s*:\s*"([^"]+)"""", RegexOption.IGNORE_CASE)
-                    .find(html)?.groupValues?.getOrNull(1)
+                    .find(rawHtml)?.groupValues?.getOrNull(1)
                 val validThroughMs = DeadlineParser.parseTimestamp(validThroughRaw)
 
-                val cleanText = HtmlSanitizer.cleanToReadableText(html)
+                val cleanText = HtmlSanitizer.cleanToReadableText(rawHtml)
                 val dl = DeadlineParser.extractDeadline(
                     cleanText = cleanText,
                     explicitExpiryMillis = validThroughMs
                 )
 
                 val mailto = Regex("""mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})""", RegexOption.IGNORE_CASE)
-                    .findAll(html).map { it.groupValues[1].trim() }.firstOrNull { HtmlSanitizer.isValidRecruiterEmail(it) }
-                val email = mailto ?: HtmlSanitizer.extractRecruiterEmail(cleanText)
+                    .findAll(rawHtml).map { it.groupValues[1].trim() }.firstOrNull { HtmlSanitizer.isValidRecruiterEmail(it) }
+                var email = mailto ?: HtmlSanitizer.extractRecruiterEmail(rawHtml).ifBlank {
+                    HtmlSanitizer.extractRecruiterEmail(cleanText)
+                }
+
+                // If email still missing, check if the page links to the company's official domain for a deep career/contact crawl
+                if (email.isBlank()) {
+                    val companySiteMatch = Regex("""href=["'](https?://(?!www\.emploitic|emploitic|tanqeeb|greenhouse|ashbyhq|lever|workday|google|facebook|linkedin|twitter)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})/?["']""", RegexOption.IGNORE_CASE)
+                        .find(rawHtml)?.groupValues?.getOrNull(1)
+                    if (!companySiteMatch.isNullOrBlank()) {
+                        val crawledEmail = crawlCompanyCareerWebsite(companySiteMatch)
+                        if (HtmlSanitizer.isValidRecruiterEmail(crawledEmail)) {
+                            email = crawledEmail
+                        }
+                    }
+                }
 
                 LiveOfferDetails(
                     recruiterEmail = email,
@@ -224,50 +282,48 @@ class JobScanner {
         fetchOfferLiveDetails(url).recruiterEmail
 
     private fun deriveAlgeriaQueries(profile: UserProfile?): List<String> {
-        if (profile == null || profile.combinedSearchCorpus().isBlank()) {
-            return listOf("")
-        }
-        val rawLower = profile.combinedSearchCorpus().take(4500).lowercase()
         val queries = mutableListOf<String>()
-
-        if (rawLower.contains("human resources") || rawLower.contains("ressources humaines") || rawLower.contains("rh") || rawLower.contains("payroll") || rawLower.contains("paie")) {
-            queries.add("ressources humaines")
+        queries.add("administration")
+        queries.add("ressources humaines")
+        queries.add("coordinateur")
+        queries.add("assistant")
+        if (profile != null && profile.combinedSearchCorpus().isNotBlank()) {
+            val rawLower = profile.combinedSearchCorpus().take(4500).lowercase()
+            if (rawLower.contains("french") || rawLower.contains("français") || rawLower.contains("enseignant")) {
+                queries.add("enseignant")
+            }
+            if (rawLower.contains("commercial") || rawLower.contains("vente")) {
+                queries.add("commercial")
+            }
+            if (rawLower.contains("develop") || rawLower.contains("kotlin") || rawLower.contains("python")) {
+                queries.add("developpeur")
+            }
         }
-        if (rawLower.contains("administrat")) {
-            queries.add("administratif")
-        }
-        if (rawLower.contains("french") || rawLower.contains("français") || rawLower.contains("francais") || rawLower.contains("teacher") || rawLower.contains("enseignant")) {
-            queries.add("enseignant")
-        }
-        if (rawLower.contains("develop") || rawLower.contains("développ") || rawLower.contains("kotlin") || rawLower.contains("python") || rawLower.contains("javascript")) {
-            queries.add("developpeur")
-        }
-        if (rawLower.contains("coordinator") || rawLower.contains("coordinateur")) {
-            queries.add("coordinateur")
-        }
-
-        // Always include the latest general feed from Algeria too
         queries.add("")
-        return queries.distinct().take(4)
+        return queries.distinct().take(5)
     }
 
     private fun deriveGulfQueries(profile: UserProfile?): List<String> {
-        if (profile == null || profile.combinedSearchCorpus().isBlank()) return emptyList()
-        val rawLower = profile.combinedSearchCorpus().take(4500).lowercase()
         val queries = mutableListOf<String>()
-        if (rawLower.contains("human resources") || rawLower.contains("ressources humaines") || rawLower.contains("payroll") || rawLower.contains("paie")) {
-            queries.add("human resources")
+        queries.add("send cv")
+        queries.add("hr email")
+        queries.add("careers email")
+        queries.add("recrutement cv")
+        queries.add("coordinator")
+        queries.add("assistant")
+        if (profile != null && profile.combinedSearchCorpus().isNotBlank()) {
+            val rawLower = profile.combinedSearchCorpus().take(4500).lowercase()
+            if (rawLower.contains("human resources") || rawLower.contains("ressources humaines") || rawLower.contains("payroll") || rawLower.contains("paie")) {
+                queries.add("human resources")
+            }
+            if (rawLower.contains("teacher") || rawLower.contains("enseignant") || rawLower.contains("french") || rawLower.contains("français")) {
+                queries.add("teacher")
+            }
+            if (rawLower.contains("develop") || rawLower.contains("software") || rawLower.contains("python") || rawLower.contains("flutter")) {
+                queries.add("developer")
+            }
         }
-        if (rawLower.contains("administrat") || rawLower.contains("coordinator") || rawLower.contains("coordinateur")) {
-            queries.add("administrator")
-        }
-        if (rawLower.contains("teacher") || rawLower.contains("enseignant") || rawLower.contains("french") || rawLower.contains("français")) {
-            queries.add("teacher")
-        }
-        if (rawLower.contains("develop") || rawLower.contains("software") || rawLower.contains("python") || rawLower.contains("flutter")) {
-            queries.add("developer")
-        }
-        return queries.distinct().take(2)
+        return queries.distinct().take(6)
     }
 
     private fun deriveSearchKeywords(profile: UserProfile?): List<String> {
@@ -312,7 +368,7 @@ class JobScanner {
 
     private fun fetchEmploiticDz(query: String): List<JobOffer> {
         val offers = mutableListOf<JobOffer>()
-        val pages = if (query.isBlank()) listOf(1, 2) else listOf(1, 2)
+        val pages = listOf(1, 2, 3)
         for (pageNum in pages) {
             val url = when {
                 query.isBlank() && pageNum == 1 -> "https://emploitic.com/offres-d-emploi"
@@ -496,13 +552,15 @@ class JobScanner {
      */
     private fun fetchTanqeebGccJobs(profile: UserProfile?, keywords: List<String>): List<JobOffer> {
         val countryEndpoints = buildList {
-            add(Triple("🇦🇪 Émirats Arabes Unis", "https://uae.tanqeeb.com/jobs/search?order_by=most_recent", "UAE"))
-            add(Triple("🇸🇦 Arabie Saoudite", "https://saudi.tanqeeb.com/jobs/search?order_by=most_recent", "Saudi Arabia"))
+            // Algérie (Direct Recruiter Posts with Emails)
+            add(Triple("🇩🇿 Algérie", "https://algeria.tanqeeb.com/jobs/search?keywords=cv+OR+recrutement+OR+rh+OR+drh&order_by=most_recent", "Algérie"))
+            add(Triple("🇦🇪 Émirats Arabes Unis", "https://uae.tanqeeb.com/jobs/search?keywords=send+cv+OR+hr+email&order_by=most_recent", "UAE"))
+            add(Triple("🇸🇦 Arabie Saoudite", "https://saudi.tanqeeb.com/jobs/search?keywords=careers+email+OR+apply+cv&order_by=most_recent", "Saudi Arabia"))
+            add(Triple("🇰🇼 Koweït", "https://kuwait.tanqeeb.com/jobs/search?keywords=hr+OR+coordinator&order_by=most_recent", "Kuwait"))
             add(Triple("🇶🇦 Qatar", "https://qatar.tanqeeb.com/jobs/search?order_by=most_recent", "Qatar"))
-            add(Triple("🇰🇼 Koweït", "https://kuwait.tanqeeb.com/jobs/search?order_by=most_recent", "Kuwait"))
             add(Triple("🇴🇲 Oman", "https://oman.tanqeeb.com/jobs/search?order_by=most_recent", "Oman"))
             add(Triple("🇧🇭 Bahreïn", "https://bahrain.tanqeeb.com/jobs/search?order_by=most_recent", "Bahrain"))
-            // Targeted keyword queries in UAE & Saudi Arabia matching the candidate's CVs
+            // Targeted keyword queries matching the candidate's CVs
             deriveGulfQueries(profile).forEach { q ->
                 val enc = URLEncoder.encode(q, "UTF-8")
                 add(Triple("🇦🇪 Émirats Arabes Unis", "https://uae.tanqeeb.com/jobs/search?keywords=$enc&order_by=most_recent", "UAE"))
@@ -521,10 +579,10 @@ class JobScanner {
                     val html = resp.body?.string() ?: return@use
                     // Split HTML into individual job cards containing data-job-share-url
                     val chunks = html.split("""data-job-share-url="""").drop(1)
-                    for (chunk in chunks.take(12)) {
+                    for (chunk in chunks.take(14)) {
                         val shareUrl = chunk.substringBefore("\"").trim()
                         if (!shareUrl.startsWith("http")) continue
-                        val cardWindow = """data-job-share-url="$chunk""".take(2200)
+                        val cardWindow = """data-job-share-url="$chunk""".take(2500)
                         val attrs = mutableMapOf<String, String>()
                         attrPattern.findAll(cardWindow).forEach { m ->
                             attrs[m.groupValues[1]] = HtmlSanitizer.cleanToReadableText(m.groupValues[2])
@@ -539,15 +597,18 @@ class JobScanner {
                         val title = h2Title.ifBlank { attrs["data-job-name"].orEmpty() }.trim()
                         if (title.isBlank()) continue
 
-                        val company = attrs["data-job-company"]?.ifBlank { "Entreprise Golfe" } ?: "Entreprise Golfe"
+                        val company = attrs["data-job-company"]?.ifBlank { "Entreprise Recruteur" } ?: "Entreprise Recruteur"
                         val loc = attrs["data-job-location"]?.ifBlank { defaultLoc } ?: defaultLoc
                         val workplace = attrs["data-job-workplace"]?.ifBlank { "On-site" } ?: "On-site"
                         val jobType = attrs["data-job-type"]?.ifBlank { "Full Time" } ?: "Full Time"
                         val category = attrs["data-job-categories"]?.takeIf { it.isNotBlank() && it != "Other" }.orEmpty()
                         val salary = attrs["data-job-salary"].orEmpty()
                         val rawDate = attrs["data-job-date"].orEmpty()
+
                         val rawContactEmail = attrs["data-job-contact-email"]?.trim().orEmpty()
-                        val email = rawContactEmail.takeIf { HtmlSanitizer.isValidRecruiterEmail(it) }.orEmpty()
+                        val emailFromCard = HtmlSanitizer.extractRecruiterEmail(cardWindow)
+                        val email = rawContactEmail.takeIf { HtmlSanitizer.isValidRecruiterEmail(it) }
+                            ?: emailFromCard.takeIf { HtmlSanitizer.isValidRecruiterEmail(it) }.orEmpty()
 
                         val isRemote = workplace.contains("remote", ignoreCase = true)
                         val workModeLabel = when {
@@ -556,16 +617,19 @@ class JobScanner {
                             else -> "ONSITE"
                         }
 
+                        val isDz = flagCountry.contains("Algérie") || defaultLoc.contains("Algérie") || loc.contains("Algeria", ignoreCase = true) || loc.contains("Algérie", ignoreCase = true)
+                        val regionScope = if (isDz) "ALGERIA" else "GULF"
+
                         val summaryDesc = buildString {
                             append("$title chez $company — $loc ($workplace, $jobType)")
                             if (category.isNotBlank()) append(" · Domaine : $category")
                             if (salary.isNotBlank()) append(" · Salaire : $salary")
                             if (rawDate.isNotBlank()) append(" · Publié : $rawDate")
-                            append(" · Source : Tanqeeb GCC ($flagCountry).")
+                            append(" · Source : Tanqeeb ($flagCountry).")
                         }
 
                         val tags = buildList {
-                            add("🏜️ Golfe")
+                            if (isDz) add("🇩🇿 Algérie") else add("🏜️ Golfe")
                             add(flagCountry)
                             add(when (workModeLabel) { "REMOTE" -> "Remote"; "HYBRID" -> "Hybride"; else -> "Présentiel" })
                             if (category.isNotBlank()) add(category)
@@ -580,13 +644,13 @@ class JobScanner {
                                 isRemote = isRemote,
                                 contractType = jobType,
                                 description = summaryDesc,
-                                sourcePlatform = "Tanqeeb Golfe",
+                                sourcePlatform = if (isDz) "Tanqeeb Algérie" else "Tanqeeb Golfe",
                                 url = shareUrl,
                                 detectedAt = System.currentTimeMillis(),
                                 requiredFormat = detectFormatFromText(summaryDesc),
                                 recruiterEmail = email,
                                 tags = tags,
-                                regionScope = "GULF",
+                                regionScope = regionScope,
                                 workMode = workModeLabel,
                                 applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE",
                                 salary = salary
@@ -599,9 +663,9 @@ class JobScanner {
             }
         }
 
-        // Enrich top prioritized matches with full JSON-LD JobPosting description & deadlines (cap: 12 fetches)
-        val prioritized = filterAndPrioritize(offers.distinctBy { it.url }, keywords, limit = 36).toMutableList()
-        for (i in 0 until minOf(12, prioritized.size)) {
+        // Enrich top prioritized matches with full JSON-LD JobPosting description & deadlines (cap: 18 fetches)
+        val prioritized = filterAndPrioritize(offers.distinctBy { it.url }, keywords, limit = 60).toMutableList()
+        for (i in 0 until minOf(18, prioritized.size)) {
             val base = prioritized[i]
             runCatching {
                 val req = Request.Builder().url(base.url).header("User-Agent", UA).build()
@@ -618,7 +682,9 @@ class JobScanner {
                         val ldEmail = base.recruiterEmail
                             .takeIf { HtmlSanitizer.isValidRecruiterEmail(it) }
                             ?: mailtoEmail
-                            ?: HtmlSanitizer.extractRecruiterEmail(fullDesc)
+                            ?: HtmlSanitizer.extractRecruiterEmail(html).ifBlank {
+                                HtmlSanitizer.extractRecruiterEmail(fullDesc)
+                            }
                         if (fullDesc.length > base.description.length || ldEmail.isNotBlank()) {
                             prioritized[i] = base.copy(
                                 description = if (fullDesc.length > base.description.length) fullDesc else base.description,
@@ -917,66 +983,77 @@ class JobScanner {
     }
 
     private fun fetchJobicyJobs(keywords: List<String>): List<JobOffer> {
-        val request = Request.Builder()
-            .url("https://jobicy.com/api/v2/remote-jobs?count=40")
-            .header("User-Agent", UA)
-            .build()
-
+        val tags = listOf("", "support", "admin", "management", "marketing", "operations", "finance")
         val offers = mutableListOf<JobOffer>()
-        httpClient.newCall(request).execute().use { resp ->
-            if (!resp.isSuccessful) return emptyList()
-            val body = resp.body?.string() ?: return emptyList()
-            val jobs = json.parseToJsonElement(body).jsonObject["jobs"]?.jsonArray ?: return emptyList()
 
-            for (el in jobs) {
-                val obj = el.jsonObject
-                val id = obj.str("id")
-                val title = HtmlSanitizer.cleanToReadableText(obj.str("jobTitle"))
-                val company = HtmlSanitizer.cleanToReadableText(obj.str("companyName"))
-                val rawDesc = obj.str("jobDescription").ifBlank { obj.str("jobExcerpt") }
-                val cleanDesc = HtmlSanitizer.cleanToReadableText(rawDesc)
-                val url = obj.str("url")
-                val geo = obj.str("jobGeo").ifBlank { "Worldwide" }
-                val rawPubDate = obj.str("pubDate")
-                val pubDate = rawPubDate.take(10)
-                val industries = obj["jobIndustry"]?.takeIf { it is JsonArray }?.jsonArray
-                    ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
-                val jobTypes = obj["jobType"]?.takeIf { it is JsonArray }?.jsonArray
-                    ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+        for (tag in tags) {
+            val url = if (tag.isBlank()) {
+                "https://jobicy.com/api/v2/remote-jobs?count=50"
+            } else {
+                "https://jobicy.com/api/v2/remote-jobs?count=40&tag=$tag"
+            }
+            runCatching {
+                val request = Request.Builder().url(url).header("User-Agent", UA).build()
+                httpClient.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val body = resp.body?.string() ?: return@use
+                    val jobs = json.parseToJsonElement(body).jsonObject["jobs"]?.jsonArray ?: return@use
 
-                if (title.isBlank() || cleanDesc.length < 25 || url.isBlank()) continue
+                    for (el in jobs) {
+                        val obj = el.jsonObject
+                        val id = obj.str("id")
+                        val title = HtmlSanitizer.cleanToReadableText(obj.str("jobTitle"))
+                        val company = HtmlSanitizer.cleanToReadableText(obj.str("companyName"))
+                        val rawDesc = obj.str("jobDescription").ifBlank { obj.str("jobExcerpt") }
+                        val cleanDesc = HtmlSanitizer.cleanToReadableText(rawDesc)
+                        val jobUrl = obj.str("url")
+                        val geo = obj.str("jobGeo").ifBlank { "Worldwide" }
+                        val rawPubDate = obj.str("pubDate")
+                        val pubDate = rawPubDate.take(10)
+                        val industries = obj["jobIndustry"]?.takeIf { it is JsonArray }?.jsonArray
+                            ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                        val jobTypes = obj["jobType"]?.takeIf { it is JsonArray }?.jsonArray
+                            ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
 
-                val email = HtmlSanitizer.extractRecruiterEmail(cleanDesc)
-                val tags = buildList {
-                    add("🌍 Remote")
-                    addAll(jobTypes.take(2))
-                    addAll(industries.take(2))
-                }.distinct()
+                        if (title.isBlank() || cleanDesc.length < 25 || jobUrl.isBlank()) continue
 
-                offers.add(
-                    JobOffer(
-                        id = "jobicy_$id",
-                        title = title,
-                        company = company,
-                        location = geo,
-                        isRemote = true,
-                        contractType = jobTypes.firstOrNull() ?: "Full-Time",
-                        description = cleanDesc,
-                        sourcePlatform = "Jobicy",
-                        url = url,
-                        detectedAt = System.currentTimeMillis(),
-                        requiredFormat = detectFormatFromText(cleanDesc),
-                        recruiterEmail = email,
-                        tags = tags,
-                        regionScope = "INTERNATIONAL",
-                        workMode = "REMOTE",
-                        applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE",
-                        publishedDate = pubDate
-                    ).withDeadlineCheck(rawPublished = rawPubDate)
-                )
+                        val email = HtmlSanitizer.extractRecruiterEmail(rawDesc).ifBlank {
+                            HtmlSanitizer.extractRecruiterEmail(cleanDesc)
+                        }
+                        val tagsList = buildList {
+                            add("🌍 Remote")
+                            addAll(jobTypes.take(2))
+                            addAll(industries.take(2))
+                        }.distinct()
+
+                        offers.add(
+                            JobOffer(
+                                id = "jobicy_$id",
+                                title = title,
+                                company = company,
+                                location = geo,
+                                isRemote = true,
+                                contractType = jobTypes.firstOrNull() ?: "Full-Time",
+                                description = cleanDesc,
+                                sourcePlatform = "Jobicy",
+                                url = jobUrl,
+                                detectedAt = System.currentTimeMillis(),
+                                requiredFormat = detectFormatFromText(cleanDesc),
+                                recruiterEmail = email,
+                                tags = tagsList,
+                                regionScope = "INTERNATIONAL",
+                                workMode = "REMOTE",
+                                applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE",
+                                publishedDate = pubDate
+                            ).withDeadlineCheck(rawPublished = rawPubDate)
+                        )
+                    }
+                }
+            }.onFailure {
+                Log.w(TAG, "Jobicy tag ($tag) error: ${it.message}")
             }
         }
-        return filterAndPrioritize(offers, keywords, limit = 20)
+        return filterAndPrioritize(offers.distinctBy { it.url }, keywords, limit = 50)
     }
 
     private fun fetchHimalayasJobs(keywords: List<String>): List<JobOffer> {
@@ -1101,65 +1178,78 @@ class JobScanner {
     }
 
     private fun fetchWeWorkRemotelyRss(keywords: List<String>): List<JobOffer> {
-        val request = Request.Builder()
-            .url("https://weworkremotely.com/remote-jobs.rss")
-            .header("User-Agent", UA)
-            .build()
+        val feeds = listOf(
+            "https://weworkremotely.com/categories/remote-customer-support-jobs.rss",
+            "https://weworkremotely.com/categories/all-other-remote-jobs.rss",
+            "https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss",
+            "https://weworkremotely.com/categories/remote-devops-sysadmin-jobs.rss",
+            "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss",
+            "https://weworkremotely.com/remote-jobs.rss"
+        )
 
         val offers = mutableListOf<JobOffer>()
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return emptyList()
-            val xml = response.body?.string() ?: return emptyList()
+        val itemRegex = Regex("<item>(.*?)</item>", RegexOption.DOT_MATCHES_ALL)
+        val titleRegex = Regex("<title><!\\[CDATA\\[(.*?)\\]\\]></title>|<title>(.*?)</title>")
+        val descRegex = Regex("<description><!\\[CDATA\\[(.*?)\\]\\]></description>|<description>(.*?)</description>", RegexOption.DOT_MATCHES_ALL)
+        val linkRegex = Regex("<link>(.*?)</link>")
+        val catRegex = Regex("<category>(.*?)</category>")
+        val regionRegex = Regex("<region>(.*?)</region>")
+        val pubRegex = Regex("<pubDate>(.*?)</pubDate>")
 
-            val itemRegex = Regex("<item>(.*?)</item>", RegexOption.DOT_MATCHES_ALL)
-            val titleRegex = Regex("<title><!\\[CDATA\\[(.*?)\\]\\]></title>|<title>(.*?)</title>")
-            val descRegex = Regex("<description><!\\[CDATA\\[(.*?)\\]\\]></description>|<description>(.*?)</description>", RegexOption.DOT_MATCHES_ALL)
-            val linkRegex = Regex("<link>(.*?)</link>")
-            val catRegex = Regex("<category>(.*?)</category>")
-            val regionRegex = Regex("<region>(.*?)</region>")
-            val pubRegex = Regex("<pubDate>(.*?)</pubDate>")
+        for (feedUrl in feeds) {
+            runCatching {
+                val request = Request.Builder().url(feedUrl).header("User-Agent", UA).build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use
+                    val xml = response.body?.string() ?: return@use
 
-            for (itemMatch in itemRegex.findAll(xml).take(35)) {
-                val itemContent = itemMatch.groupValues[1]
-                val rawTitle = titleRegex.find(itemContent)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } } ?: continue
-                val rawDesc = descRegex.find(itemContent)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } } ?: ""
-                val link = linkRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: ""
-                val category = catRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: ""
-                val region = regionRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: "Anywhere"
-                val rawPubDate = pubRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: ""
+                    for (itemMatch in itemRegex.findAll(xml).take(40)) {
+                        val itemContent = itemMatch.groupValues[1]
+                        val rawTitle = titleRegex.find(itemContent)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } } ?: continue
+                        val rawDesc = descRegex.find(itemContent)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } } ?: ""
+                        val link = linkRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: ""
+                        val category = catRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: ""
+                        val region = regionRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: "Anywhere"
+                        val rawPubDate = pubRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: ""
 
-                val parts = HtmlSanitizer.cleanToReadableText(rawTitle).split(":", limit = 2)
-                val company = if (parts.size > 1) parts[0].trim() else "Remote Company"
-                val position = if (parts.size > 1) parts[1].trim() else rawTitle.trim()
+                        val parts = HtmlSanitizer.cleanToReadableText(rawTitle).split(":", limit = 2)
+                        val company = if (parts.size > 1) parts[0].trim() else "Entreprise Internationale"
+                        val position = if (parts.size > 1) parts[1].trim() else rawTitle.trim()
 
-                val cleanDesc = HtmlSanitizer.cleanToReadableText(rawDesc)
-                if (position.isBlank() || cleanDesc.length < 25 || link.isBlank()) continue
+                        val cleanDesc = HtmlSanitizer.cleanToReadableText(rawDesc)
+                        if (position.isBlank() || cleanDesc.length < 25 || link.isBlank()) continue
 
-                val email = HtmlSanitizer.extractRecruiterEmail(cleanDesc)
+                        val email = HtmlSanitizer.extractRecruiterEmail(rawDesc).ifBlank {
+                            HtmlSanitizer.extractRecruiterEmail(cleanDesc)
+                        }
 
-                offers.add(
-                    JobOffer(
-                        id = "wwr_${link.hashCode()}",
-                        title = position,
-                        company = company,
-                        location = region,
-                        isRemote = true,
-                        contractType = "Full-time / Remote",
-                        description = cleanDesc,
-                        sourcePlatform = "WeWorkRemotely",
-                        url = link,
-                        detectedAt = System.currentTimeMillis(),
-                        requiredFormat = detectFormatFromText(cleanDesc),
-                        recruiterEmail = email,
-                        tags = listOfNotNull("🌍 Remote", category.ifBlank { null }).distinct(),
-                        regionScope = "INTERNATIONAL",
-                        workMode = "REMOTE",
-                        applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE"
-                    ).withDeadlineCheck(rawPublished = rawPubDate)
-                )
+                        offers.add(
+                            JobOffer(
+                                id = "wwr_${link.hashCode()}",
+                                title = position,
+                                company = company,
+                                location = region,
+                                isRemote = true,
+                                contractType = "Full-time / Remote",
+                                description = cleanDesc,
+                                sourcePlatform = "WeWorkRemotely",
+                                url = link,
+                                detectedAt = System.currentTimeMillis(),
+                                requiredFormat = detectFormatFromText(cleanDesc),
+                                recruiterEmail = email,
+                                tags = listOfNotNull("🌍 Remote", category.ifBlank { null }).distinct(),
+                                regionScope = "INTERNATIONAL",
+                                workMode = "REMOTE",
+                                applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE"
+                            ).withDeadlineCheck(rawPublished = rawPubDate)
+                        )
+                    }
+                }
+            }.onFailure {
+                Log.w(TAG, "WWR feed ($feedUrl) error: ${it.message}")
             }
         }
-        return filterAndPrioritize(offers, keywords, limit = 15)
+        return filterAndPrioritize(offers.distinctBy { it.url }, keywords, limit = 60)
     }
 
     private fun filterAndPrioritize(
@@ -1167,15 +1257,20 @@ class JobScanner {
         keywords: List<String>,
         limit: Int
     ): List<JobOffer> {
-        if (keywords.isEmpty()) return offers.take(limit)
-        val scored = offers.map { offer ->
+        if (offers.isEmpty()) return emptyList()
+
+        // ALWAYS preserve and prioritize every offer with a valid direct recruiter email
+        val withEmail = offers.filter { it.recruiterEmail.isNotBlank() && HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
+        val withoutEmail = offers.filterNot { it.recruiterEmail.isNotBlank() && HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
+
+        val scoredWithout = withoutEmail.map { offer ->
             val corpus = "${offer.title} ${offer.description} ${offer.tags.joinToString(" ")}".lowercase()
-            val hits = keywords.count { kw -> corpus.contains(kw.lowercase()) }
+            val hits = if (keywords.isEmpty()) 1 else keywords.count { kw -> corpus.contains(kw.lowercase()) }
             offer to hits
-        }
-        // Keep matching offers first; if few match strictly, still return latest genuine live jobs
-        val matched = scored.filter { it.second > 0 }.sortedByDescending { it.second }.map { it.first }
-        return if (matched.size >= 5) matched.take(limit) else (matched + scored.filter { it.second == 0 }.map { it.first }).take(limit)
+        }.sortedByDescending { it.second }.map { it.first }
+
+        val combined = (withEmail + scoredWithout).distinctBy { it.url.ifBlank { it.id } }
+        return combined.take(limit)
     }
 
     /**

@@ -528,7 +528,7 @@ object ApplicationAutomationManager {
 
         // Re-score non-AI cached rows with latest domain guard so out-of-profile tech/medical titles drop out immediately
         val minEligibilityScore = (initialSettings.autoApplyMinScore - 15).coerceAtLeast(45)
-        val rawCandidates = dao.getTopAutoApplyCandidates(limit = 120)
+        val rawCandidates = dao.getTopAutoApplyCandidates(limit = 150)
             .map { entity ->
                 val domain = entity.toDomain()
                 if (domain.aiReasoning.isBlank()) scanner.rescoreWithProfile(domain, migratedProfile) else domain
@@ -566,7 +566,7 @@ object ApplicationAutomationManager {
             var enrichedOffer = candidate
             if (!HtmlSanitizer.isValidRecruiterEmail(enrichedOffer.recruiterEmail) &&
                 enrichedOffer.url.startsWith("http") &&
-                liveLookups < 35
+                liveLookups < 50
             ) {
                 liveLookups++
                 val details = scanner.fetchOfferLiveDetails(enrichedOffer.url)

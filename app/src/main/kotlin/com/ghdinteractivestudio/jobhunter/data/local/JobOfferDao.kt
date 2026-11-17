@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface JobOfferDao {
-    @Query("SELECT * FROM job_offers ORDER BY matchScore DESC, detectedAt DESC")
+    @Query("SELECT * FROM job_offers ORDER BY CASE WHEN recruiterEmail IS NOT NULL AND recruiterEmail != '' AND recruiterEmail LIKE '%@%' THEN 1 ELSE 0 END DESC, matchScore DESC, detectedAt DESC")
     fun getAllOffers(): Flow<List<JobOfferEntity>>
 
     @Query("SELECT * FROM job_offers WHERE status = :status ORDER BY detectedAt DESC")
@@ -18,7 +18,7 @@ interface JobOfferDao {
     @Query("SELECT * FROM job_offers WHERE status = :status ORDER BY appliedAt ASC")
     suspend fun getOffersByStatusOnce(status: String): List<JobOfferEntity>
 
-    @Query("SELECT * FROM job_offers WHERE status = 'DETECTED' OR (status = 'ANALYZED' AND aiVerdict != 'NON_ADAPTE' AND matchScore >= 50) ORDER BY matchScore DESC, detectedAt DESC LIMIT :limit")
+    @Query("SELECT * FROM job_offers WHERE status = 'DETECTED' OR (status = 'ANALYZED' AND aiVerdict != 'NON_ADAPTE' AND matchScore >= 50) ORDER BY CASE WHEN recruiterEmail IS NOT NULL AND recruiterEmail != '' AND recruiterEmail LIKE '%@%' THEN 1 ELSE 0 END DESC, matchScore DESC, detectedAt DESC LIMIT :limit")
     suspend fun getTopAutoApplyCandidates(limit: Int): List<JobOfferEntity>
 
     @Query("SELECT * FROM job_offers WHERE status IN ('APPLIED', 'INTERVIEW', 'READY_TO_SEND') ORDER BY appliedAt DESC")

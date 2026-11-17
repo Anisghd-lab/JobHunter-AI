@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import com.ghdinteractivestudio.jobhunter.domain.document.HtmlSanitizer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -117,6 +118,7 @@ fun RadarScreen(
     val filteredOffers = remember(offers, selectedFilter, searchQuery) {
         offers.filter { offer ->
             val matchesFilter = when (selectedFilter) {
+                "DIRECT_EMAIL" -> offer.recruiterEmail.isNotBlank() && HtmlSanitizer.isValidRecruiterEmail(offer.recruiterEmail)
                 "ALGERIA" -> offer.regionScope == "ALGERIA"
                 "GULF" -> offer.regionScope == "GULF"
                 "INTERNATIONAL" -> offer.regionScope == "INTERNATIONAL"
@@ -128,12 +130,14 @@ fun RadarScreen(
                 offer.title.contains(searchQuery, ignoreCase = true) ||
                 offer.company.contains(searchQuery, ignoreCase = true) ||
                 offer.location.contains(searchQuery, ignoreCase = true) ||
+                offer.recruiterEmail.contains(searchQuery, ignoreCase = true) ||
                 offer.tags.any { it.contains(searchQuery, ignoreCase = true) }
 
             matchesFilter && matchesQuery
         }
     }
 
+    val directEmailCount = offers.count { it.recruiterEmail.isNotBlank() && HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
     val dzCount = offers.count { it.regionScope == "ALGERIA" }
     val gulfCount = offers.count { it.regionScope == "GULF" }
     val intlCount = offers.count { it.regionScope == "INTERNATIONAL" }
@@ -187,7 +191,7 @@ fun RadarScreen(
 
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "${offers.size} offres actives · 🇩🇿 Algérie: $dzCount · 🏜️ Golfe: $gulfCount · 🌍 Monde: $intlCount",
+                    text = "${offers.size} offres actives · 📧 Email Direct: $directEmailCount · 🇩🇿 DZ: $dzCount · 🏜️ Golfe: $gulfCount · 🌍 Monde: $intlCount",
                     style = Type.label,
                     color = Palette.secondary
                 )
@@ -197,7 +201,7 @@ fun RadarScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Filtrer poste, compétence, Golfe, wilaya...", style = Type.label) },
+                    placeholder = { Text("Filtrer poste, email, compétence, wilaya...", style = Type.label) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Palette.secondary, modifier = Modifier.size(18.dp)) },
                     singleLine = true,
                     shape = Capsule(),
@@ -209,7 +213,7 @@ fun RadarScreen(
 
         Spacer(Modifier.height(10.dp))
 
-        // Filter Chips Bar (Tout, Algérie, Golfe GCC, Monde, Présentiel, Remote)
+        // Filter Chips Bar (Tout, Email Direct, Algérie, Golfe GCC, Monde, Présentiel, Remote)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -218,6 +222,7 @@ fun RadarScreen(
         ) {
             listOf(
                 "ALL" to "Tout (${offers.size})",
+                "DIRECT_EMAIL" to "📧 Email Direct ($directEmailCount)",
                 "ALGERIA" to "🇩🇿 Algérie ($dzCount)",
                 "GULF" to "🏜️ Golfe ($gulfCount)",
                 "INTERNATIONAL" to "🌍 Monde ($intlCount)",

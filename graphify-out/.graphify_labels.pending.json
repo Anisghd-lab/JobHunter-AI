@@ -37,7 +37,7 @@
   "35": ".onCreate",
   "36": "Color",
   "37": "Context",
-  "38": "EmailDispatcher",
+  "38": "ApplicationAutomationManager.kt",
   "39": "Uri",
   "40": "Volatile",
   "41": "Type.kt",
@@ -46,5 +46,13 @@
   "44": "Composable",
   "45": "Modifier",
   "46": "OptIn",
-  "47": "StateFlow"
+  "47": "StateFlow",
+  "48": "FreeLlmProvider",
+  "49": "Context",
+  "50": "Intent",
+  "51": "Result",
+  "52": "Composable",
+  "53": "Modifier",
+  "54": "OptIn",
+  "55": "StateFlow"
 }

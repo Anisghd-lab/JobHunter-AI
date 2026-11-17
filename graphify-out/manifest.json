@@ -24,9 +24,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/JobOfferDao.kt": {
-    "mtime": 1794926600.3533573,
-    "seen": 1794926679.1588902,
-    "ast_hash": "eab9dfd4bf8ee39e15d3a64f968ac4b3",
+    "mtime": 1794930354.3089457,
+    "seen": 1794932033.658942,
+    "ast_hash": "5b9cfe7036ebdda7d53396c35f9cce84",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/JobOfferEntity.kt": {
@@ -48,9 +48,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/remote/JobScanner.kt": {
-    "mtime": 1794921594.0330625,
-    "seen": 1794921804.5817397,
-    "ast_hash": "7e96d1ec3d7366ffca60145aa8a3bbb6",
+    "mtime": 1794931004.0776873,
+    "seen": 1794932033.6589837,
+    "ast_hash": "e08685a86046a561544c8b211e0505cd",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/ai/CvTailoringEngine.kt": {
@@ -150,9 +150,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/screens/RadarScreen.kt": {
-    "mtime": 1794923761.7972364,
-    "seen": 1794924063.2024207,
-    "ast_hash": "7a0129faed38a03cf3b816b15907952b",
+    "mtime": 1794931691.7424338,
+    "seen": 1794932033.6591382,
+    "ast_hash": "85fd2894db7b130365c5d32cfb4df06e",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/theme/Motion.kt": {
@@ -306,15 +306,15 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/automation/ApplicationAutomationManager.kt": {
-    "mtime": 1794922560.5229897,
-    "seen": 1794924063.2023325,
-    "ast_hash": "fcc4245647a2263c19cfd828aaf1ea70",
+    "mtime": 1794931034.145687,
+    "seen": 1794932033.6590078,
+    "ast_hash": "7e83f64d5274cd61301783f4b3ebe5f0",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/document/HtmlSanitizer.kt": {
-    "mtime": 1794917281.4569619,
-    "seen": 1794917768.0292056,
-    "ast_hash": "9f2f3cd2a39858f461914440556702d9",
+    "mtime": 1794930263.1253412,
+    "seen": 1794932033.659047,
+    "ast_hash": "ef7f543112ecb82169b8fc687e409de7",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/document/DeadlineParser.kt": {
