@@ -9,10 +9,15 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.Socket
+import java.nio.charset.Charset
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
@@ -52,7 +57,8 @@ data class IncomingReplyEmail(
     val from: String,
     val subject: String,
     val date: String,
-    val snippet: String
+    val snippet: String,
+    val messageId: String = ""
 )
 
 class EmailDispatcher(private val config: EmailConfig) {
@@ -93,9 +99,12 @@ class EmailDispatcher(private val config: EmailConfig) {
 
     /**
      * Read-only IMAP check (EXAMINE INBOX + BODY.PEEK) over TLS port 993 using the user's same email + App Password.
-     * Never alters Read/Unread flags in the user's mailbox.
+     * Uses SEARCH SINCE + RFC 2047 (Base64 & Quoted-Printable) decoding and NEVER alters Read/Unread flags.
      */
-    suspend fun fetchRecentInboxReplies(maxMessages: Int = 20): Result<List<IncomingReplyEmail>> = withContext(Dispatchers.IO) {
+    suspend fun fetchRecentInboxReplies(
+        maxMessages: Int = 40,
+        lookbackDays: Int = 14
+    ): Result<List<IncomingReplyEmail>> = withContext(Dispatchers.IO) {
         runCatching {
             val password = config.normalizedPassword()
             val user = config.smtpUser.ifBlank { config.senderEmail }.trim()
@@ -106,107 +115,214 @@ class EmailDispatcher(private val config: EmailConfig) {
             val imapHost = config.inferImapHost()
             val socket = SSLSocketFactory.getDefault().createSocket(imapHost, 993) as SSLSocket
             socket.soTimeout = 20000
-            socket.startHandshake()
+            try {
+                socket.startHandshake()
 
-            val reader = BufferedReader(InputStreamReader(socket.inputStream, Charsets.UTF_8))
-            val writer = BufferedWriter(OutputStreamWriter(socket.outputStream, Charsets.UTF_8))
+                val reader = BufferedReader(InputStreamReader(socket.inputStream, Charsets.UTF_8))
+                val writer = BufferedWriter(OutputStreamWriter(socket.outputStream, Charsets.UTF_8))
 
-            fun readTagged(tag: String): List<String> {
-                val lines = mutableListOf<String>()
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    lines.add(line)
-                    if (line.startsWith("$tag OK") || line.startsWith("$tag NO") || line.startsWith("$tag BAD")) {
-                        if (!line.startsWith("$tag OK")) error("IMAP error: $line")
-                        break
-                    }
-                }
-                return lines
-            }
-
-            val greeting = reader.readLine() ?: ""
-            if (!greeting.startsWith("* OK")) error("IMAP connection error: $greeting")
-
-            val escapedUser = user.replace("\"", "\\\"")
-            val escapedPass = password.replace("\"", "\\\"")
-            writer.write("a1 LOGIN \"$escapedUser\" \"$escapedPass\"\r\n")
-            writer.flush()
-            readTagged("a1")
-
-            writer.write("a2 EXAMINE INBOX\r\n")
-            writer.flush()
-            val examineLines = readTagged("a2")
-            val existsCount = examineLines
-                .firstOrNull { it.contains(" EXISTS", ignoreCase = true) }
-                ?.let { Regex("""\*\s+(\d+)\s+EXISTS""").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
-                ?: 0
-
-            val results = mutableListOf<IncomingReplyEmail>()
-            if (existsCount > 0) {
-                val startSeq = maxOf(1, existsCount - maxMessages + 1)
-                writer.write("a3 FETCH $startSeq:$existsCount (BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)] BODY.PEEK[TEXT]<0.1000>)\r\n")
-                writer.flush()
-                val fetchLines = readTagged("a3")
-
-                // Parse streamed FETCH blocks cleanly
-                var currentFrom = ""
-                var currentSubject = ""
-                var currentDate = ""
-                val bodyBuf = StringBuilder()
-
-                fun flushCurrent() {
-                    if (currentFrom.isNotBlank() || currentSubject.isNotBlank()) {
-                        results.add(
-                            IncomingReplyEmail(
-                                from = currentFrom.trim(),
-                                subject = currentSubject.trim(),
-                                date = currentDate.trim(),
-                                snippet = bodyBuf.toString()
-                                    .replace(Regex("<[^>]+>"), " ")
-                                    .replace(Regex("\\s+"), " ")
-                                    .trim()
-                                    .take(600)
-                            )
-                        )
-                    }
-                    currentFrom = ""
-                    currentSubject = ""
-                    currentDate = ""
-                    bodyBuf.setLength(0)
-                }
-
-                for (line in fetchLines) {
-                    when {
-                        line.startsWith("* ") && line.contains(" FETCH ") -> flushCurrent()
-                        line.startsWith("From:", ignoreCase = true) -> currentFrom = line.substringAfter(":").trim()
-                        line.startsWith("Subject:", ignoreCase = true) -> currentSubject = decodeMimeHeader(line.substringAfter(":").trim())
-                        line.startsWith("Date:", ignoreCase = true) -> currentDate = line.substringAfter(":").trim()
-                        line.startsWith("a3 OK") -> flushCurrent()
-                        !line.startsWith(")") && !line.startsWith("BODY[") && line.isNotBlank() -> {
-                            if (bodyBuf.length < 1200) bodyBuf.append(line).append(' ')
+                fun readTagged(tag: String): List<String> {
+                    val lines = mutableListOf<String>()
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        lines.add(line)
+                        if (line.startsWith("$tag OK") || line.startsWith("$tag NO") || line.startsWith("$tag BAD")) {
+                            if (!line.startsWith("$tag OK")) error("IMAP error: $line")
+                            break
                         }
                     }
+                    return lines
                 }
-                flushCurrent()
-            }
 
-            runCatching {
-                writer.write("a4 LOGOUT\r\n")
+                val greeting = reader.readLine() ?: ""
+                if (!greeting.startsWith("* OK")) error("IMAP connection error: $greeting")
+
+                val escapedUser = user.replace("\"", "\\\"")
+                val escapedPass = password.replace("\"", "\\\"")
+                writer.write("a1 LOGIN \"$escapedUser\" \"$escapedPass\"\r\n")
                 writer.flush()
+                readTagged("a1")
+
+                writer.write("a2 EXAMINE INBOX\r\n")
+                writer.flush()
+                val examineLines = readTagged("a2")
+                val existsCount = examineLines
+                    .firstOrNull { it.contains(" EXISTS", ignoreCase = true) }
+                    ?.let { Regex("""\*\s+(\d+)\s+EXISTS""").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+                    ?: 0
+
+                val results = mutableListOf<IncomingReplyEmail>()
+                if (existsCount > 0) {
+                    val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -lookbackDays) }
+                    val sinceDate = SimpleDateFormat("dd-MMM-yyyy", Locale.US).format(cal.time)
+                    val searchIds = runCatching {
+                        writer.write("a2b SEARCH SINCE $sinceDate\r\n")
+                        writer.flush()
+                        val searchLines = readTagged("a2b")
+                        searchLines
+                            .filter { it.startsWith("* SEARCH", ignoreCase = true) }
+                            .flatMap { it.removePrefix("* SEARCH").trim().split(Regex("\\s+")) }
+                            .mapNotNull { it.toIntOrNull() }
+                    }.getOrDefault(emptyList())
+
+                    val fetchTarget = if (searchIds.isNotEmpty()) {
+                        searchIds.takeLast(maxMessages).joinToString(",")
+                    } else {
+                        val startSeq = maxOf(1, existsCount - maxMessages + 1)
+                        "$startSeq:$existsCount"
+                    }
+
+                    writer.write(
+                        "a3 FETCH $fetchTarget (BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)] BODY.PEEK[TEXT]<0.1600>)\r\n"
+                    )
+                    writer.flush()
+                    val fetchLines = readTagged("a3")
+
+                    var currentFrom = ""
+                    var currentSubject = ""
+                    var currentDate = ""
+                    var currentMessageId = ""
+                    var activeHeader = ""
+                    var inHeaderSection = false
+                    val bodyBuf = StringBuilder()
+
+                    fun flushCurrent() {
+                        if (currentFrom.isNotBlank() || currentSubject.isNotBlank()) {
+                            val cleanSnippet = decodeBodySnippet(bodyBuf.toString())
+                            val cleanSubject = decodeMimeHeader(currentSubject.trim())
+                            val cleanFrom = decodeMimeHeader(currentFrom.trim())
+                            val msgId = currentMessageId.trim().ifBlank {
+                                "fallback_${cleanFrom}|${cleanSubject}|${currentDate.trim()}".hashCode().toString()
+                            }
+                            results.add(
+                                IncomingReplyEmail(
+                                    from = cleanFrom,
+                                    subject = cleanSubject,
+                                    date = currentDate.trim(),
+                                    snippet = cleanSnippet,
+                                    messageId = msgId
+                                )
+                            )
+                        }
+                        currentFrom = ""
+                        currentSubject = ""
+                        currentDate = ""
+                        currentMessageId = ""
+                        activeHeader = ""
+                        inHeaderSection = false
+                        bodyBuf.setLength(0)
+                    }
+
+                    for (line in fetchLines) {
+                        when {
+                            line.startsWith("* ") && line.contains(" FETCH ") -> {
+                                flushCurrent()
+                                inHeaderSection = true
+                            }
+                            line.startsWith("a3 OK") -> flushCurrent()
+                            line.trimStart().startsWith("BODY[HEADER", ignoreCase = true) -> inHeaderSection = true
+                            line.trimStart().startsWith("BODY[TEXT", ignoreCase = true) ||
+                                (inHeaderSection && line.isBlank()) -> {
+                                inHeaderSection = false
+                                activeHeader = ""
+                            }
+                            inHeaderSection && (line.startsWith(" ") || line.startsWith("\t")) && activeHeader.isNotBlank() -> {
+                                when (activeHeader) {
+                                    "FROM" -> currentFrom += " " + line.trim()
+                                    "SUBJECT" -> currentSubject += " " + line.trim()
+                                    "DATE" -> currentDate += " " + line.trim()
+                                    "MSGID" -> currentMessageId += line.trim()
+                                }
+                            }
+                            inHeaderSection && line.startsWith("From:", ignoreCase = true) -> {
+                                activeHeader = "FROM"
+                                currentFrom = line.substringAfter(":").trim()
+                            }
+                            inHeaderSection && line.startsWith("Subject:", ignoreCase = true) -> {
+                                activeHeader = "SUBJECT"
+                                currentSubject = line.substringAfter(":").trim()
+                            }
+                            inHeaderSection && line.startsWith("Date:", ignoreCase = true) -> {
+                                activeHeader = "DATE"
+                                currentDate = line.substringAfter(":").trim()
+                            }
+                            inHeaderSection && line.startsWith("Message-ID:", ignoreCase = true) -> {
+                                activeHeader = "MSGID"
+                                currentMessageId = line.substringAfter(":").trim()
+                            }
+                            inHeaderSection && line.contains(":") -> activeHeader = ""
+                            !line.trimStart().startsWith(")") && !line.trimStart().startsWith("BODY[") && line.isNotBlank() -> {
+                                if (bodyBuf.length < 2000) bodyBuf.append(line).append('\n')
+                            }
+                        }
+                    }
+                    flushCurrent()
+                }
+
+                runCatching {
+                    writer.write("a4 LOGOUT\r\n")
+                    writer.flush()
+                }
+                results.reversed()
+            } finally {
+                runCatching { socket.close() }
             }
-            runCatching { socket.close() }
-            results.reversed()
         }
     }
 
     private fun decodeMimeHeader(raw: String): String {
-        val m = Regex("""=\?UTF-8\?B\?([^?]+)\?=""", RegexOption.IGNORE_CASE).find(raw)
-        if (m != null) {
-            return runCatching {
-                String(Base64.decode(m.groupValues[1], Base64.DEFAULT), Charsets.UTF_8)
-            }.getOrDefault(raw)
+        if (!raw.contains("=?")) return raw
+        val normalized = raw.replace(Regex("""\?=\s+=\?"""), "?==?")
+        val tokenRegex = Regex("""=\?([^?]+)\?([BQ])\?([^?]+)\?=""", RegexOption.IGNORE_CASE)
+        return tokenRegex.replace(normalized) { match ->
+            val charsetName = match.groupValues[1].trim()
+            val encoding = match.groupValues[2].uppercase()
+            val payload = match.groupValues[3]
+            val charset = runCatching { Charset.forName(charsetName) }.getOrDefault(Charsets.UTF_8)
+            runCatching {
+                when (encoding) {
+                    "B" -> String(Base64.decode(payload, Base64.DEFAULT), charset)
+                    "Q" -> decodeQuotedPrintable(payload.replace('_', ' '), charset)
+                    else -> match.value
+                }
+            }.getOrDefault(match.value)
+        }.trim()
+    }
+
+    private fun decodeQuotedPrintable(input: String, charset: Charset = Charsets.UTF_8): String {
+        val cleaned = input.replace(Regex("""=\r?\n"""), "")
+        val out = ByteArrayOutputStream()
+        var i = 0
+        while (i < cleaned.length) {
+            val ch = cleaned[i]
+            if (ch == '=' && i + 2 < cleaned.length) {
+                val hex = cleaned.substring(i + 1, i + 3)
+                val parsed = hex.toIntOrNull(16)
+                if (parsed != null) {
+                    out.write(parsed)
+                    i += 3
+                    continue
+                }
+            }
+            out.write(ch.code and 0xFF)
+            i++
         }
-        return raw
+        return String(out.toByteArray(), charset)
+    }
+
+    private fun decodeBodySnippet(rawBody: String): String {
+        val qpDecoded = if (rawBody.contains("=C3=") || rawBody.contains("=20") || rawBody.contains("=\n")) {
+            decodeQuotedPrintable(rawBody, Charsets.UTF_8)
+        } else {
+            rawBody
+        }
+        return qpDecoded
+            .replace(Regex("(?im)^--[a-zA-Z0-9._=-]+(--)?\\s*$"), " ")
+            .replace(Regex("(?im)^(Content-Type|Content-Transfer-Encoding|Content-Disposition|MIME-Version):.*$"), " ")
+            .replace(Regex("<[^>]+>"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(700)
     }
 
     private fun readSmtpResponse(reader: BufferedReader): String {

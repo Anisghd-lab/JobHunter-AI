@@ -54,5 +54,11 @@ data class JobOffer(
     val deadlineLabel: String = "",
     val followUpCount: Int = 0,
     val lastFollowUpAt: Long = 0L,
-    val lastReplySummary: String = ""
+    val lastReplySummary: String = "",
+    val autoApplied: Boolean = false,
+    val lastAutoAttemptAt: Long = 0L,
+    val lastReplyFrom: String = "",
+    val lastReplySubject: String = "",
+    val lastReplyAt: Long = 0L,
+    val lastReplyMessageId: String = ""
 )

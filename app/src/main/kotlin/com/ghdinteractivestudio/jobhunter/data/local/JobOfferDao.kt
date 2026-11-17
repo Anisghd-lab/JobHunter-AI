@@ -18,6 +18,27 @@ interface JobOfferDao {
     @Query("SELECT * FROM job_offers WHERE status = :status ORDER BY appliedAt ASC")
     suspend fun getOffersByStatusOnce(status: String): List<JobOfferEntity>
 
+    @Query("SELECT * FROM job_offers WHERE status IN ('DETECTED', 'ANALYZED') ORDER BY matchScore DESC, detectedAt DESC LIMIT :limit")
+    suspend fun getTopAutoApplyCandidates(limit: Int): List<JobOfferEntity>
+
+    @Query("SELECT * FROM job_offers WHERE status IN ('APPLIED', 'INTERVIEW', 'READY_TO_SEND') ORDER BY appliedAt DESC")
+    suspend fun getTrackedFollowUpCandidates(): List<JobOfferEntity>
+
+    @Query("SELECT * FROM job_offers WHERE status IN ('APPLIED', 'INTERVIEW', 'REJECTED')")
+    suspend fun getAppliedSignatures(): List<JobOfferEntity>
+
+    @Query("SELECT * FROM job_offers WHERE status = 'DETECTED'")
+    suspend fun getDetectedOffersOnce(): List<JobOfferEntity>
+
+    @Query("SELECT COUNT(*) FROM job_offers WHERE autoApplied = 1 AND appliedAt >= :sinceMillis")
+    suspend fun countAutoAppliedSince(sinceMillis: Long): Int
+
+    @Query("UPDATE job_offers SET status = 'DETECTED', appliedAt = 0, appliedChannel = '', followUpCount = 0, lastFollowUpAt = 0, lastReplySummary = '', lastReplyFrom = '', lastReplySubject = '', lastReplyAt = 0, lastReplyMessageId = '', autoApplied = 0, lastAutoAttemptAt = 0, generatedLetter = '', tailoredCvPath = '', letterPath = '' WHERE status IN ('ANALYZED', 'READY_TO_SEND', 'APPLIED', 'INTERVIEW', 'REJECTED')")
+    suspend fun resetAllPipelineCounters(): Int
+
+    @Query("UPDATE job_offers SET recruiterEmail = '', applicationMethod = 'WEBSITE' WHERE lower(recruiterEmail) LIKE '%accommodations%' OR lower(recruiterEmail) LIKE '%accessibility%' OR lower(recruiterEmail) LIKE '%privacy%' OR lower(recruiterEmail) LIKE '%legal@%' OR lower(recruiterEmail) LIKE '%noreply%'")
+    suspend fun sanitizeInvalidRecruiterEmails(): Int
+
     @Query("SELECT * FROM job_offers WHERE status != 'DETECTED' ORDER BY appliedAt DESC, detectedAt DESC")
     fun getPipelineOffers(): Flow<List<JobOfferEntity>>
 

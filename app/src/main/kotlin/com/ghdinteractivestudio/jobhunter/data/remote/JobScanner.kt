@@ -207,8 +207,8 @@ class JobScanner {
                 )
 
                 val mailto = Regex("""mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})""", RegexOption.IGNORE_CASE)
-                    .find(html)?.groupValues?.getOrNull(1)
-                val email = mailto?.takeIf { it.isNotBlank() } ?: HtmlSanitizer.extractRecruiterEmail(cleanText)
+                    .findAll(html).map { it.groupValues[1].trim() }.firstOrNull { HtmlSanitizer.isValidRecruiterEmail(it) }
+                val email = mailto ?: HtmlSanitizer.extractRecruiterEmail(cleanText)
 
                 LiveOfferDetails(
                     recruiterEmail = email,

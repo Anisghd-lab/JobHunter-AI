@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
     private val busyOfferIdState = MutableStateFlow<String?>(null)
     private val activeOutcomeState = MutableStateFlow<ApplicationOutcome?>(null)
     private val isCheckingFollowUpState = MutableStateFlow(false)
+    private val isRunningAutomationState = MutableStateFlow(false)
 
     private val scanner = JobScanner()
 
@@ -129,6 +130,12 @@ class MainActivity : ComponentActivity() {
             val busyOfferId by busyOfferIdState.collectAsState()
             val activeOutcome by activeOutcomeState.collectAsState()
             val isCheckingFollowUp by isCheckingFollowUpState.collectAsState()
+            val isRunningAutomation by isRunningAutomationState.collectAsState()
+            val allOffersSnapshot by allOffersState.collectAsState()
+            val todayAutoCount = remember(allOffersSnapshot) {
+                val todayStart = ApplicationAutomationManager.startOfTodayMillis()
+                allOffersSnapshot.count { it.autoApplied && it.appliedAt >= todayStart }
+            }
 
             JobHunterTheme(darkTheme = settings.isDarkTheme) {
                 LiquidGlassBackdrop {
@@ -188,20 +195,33 @@ class MainActivity : ComponentActivity() {
 
                         "pipeline" -> PipelineScreen(
                             allOffersFlow = allOffersState,
+                            lastInboxCheckAt = settings.lastInboxCheckAt,
                             isCheckingFollowUp = isCheckingFollowUp,
                             onRunAiFollowUpClick = {
                                 coroutineScope.launch(Dispatchers.IO) {
                                     if (isCheckingFollowUpState.value) return@launch
                                     isCheckingFollowUpState.value = true
-                                    val (updates, summary) = ApplicationAutomationManager.runAutonomousEmailFollowUpCycle(
+                                    val report = ApplicationAutomationManager.runAutonomousEmailFollowUpCycle(
                                         context = this@MainActivity,
                                         profile = userProfileState.value,
-                                        settings = settingsRepo.settings.value
+                                        settingsRepo = settingsRepo
                                     )
                                     isCheckingFollowUpState.value = false
                                     withContext(Dispatchers.Main) {
-                                        val msg = if (updates > 0) "$updates mise(s) à jour IA : $summary" else summary
+                                        val msg = if (report.updatedCount > 0) "${report.updatedCount} mise(s) à jour IA : ${report.summary}" else report.summary
                                         Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            onResetCountersClick = {
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val count = ApplicationAutomationManager.resetPipelineToZero(this@MainActivity, settingsRepo)
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            "Compteurs remis à 0 ($count dossier(s) réinitialisé(s)) ✓",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
                                     }
                                 }
                             },
@@ -293,7 +313,40 @@ class MainActivity : ComponentActivity() {
                             }
                         )
 
-                        "agent" -> AgentScreen(settingsRepo = settingsRepo)
+                        "agent" -> AgentScreen(
+                            settingsRepo = settingsRepo,
+                            todayAutoCount = todayAutoCount,
+                            isRunningAutomation = isRunningAutomation,
+                            onRunAutomationNowClick = {
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    if (isRunningAutomationState.value) return@launch
+                                    isRunningAutomationState.value = true
+                                    val batch = ApplicationAutomationManager.runAutonomousAutoApplyBatch(
+                                        context = this@MainActivity,
+                                        profile = userProfileState.value,
+                                        settingsRepo = settingsRepo,
+                                        scanner = scanner,
+                                        forceRun = true
+                                    )
+                                    val liveSettings = settingsRepo.settings.value
+                                    val followMsg = if (liveSettings.aiAutonomousEmailControl && liveSettings.canSendSilently()) {
+                                        ApplicationAutomationManager.runAutonomousEmailFollowUpCycle(
+                                            context = this@MainActivity,
+                                            profile = userProfileState.value,
+                                            settingsRepo = settingsRepo
+                                        ).summary
+                                    } else ""
+                                    isRunningAutomationState.value = false
+                                    withContext(Dispatchers.Main) {
+                                        val toastText = listOfNotNull(
+                                            batch.summary.takeIf { it.isNotBlank() },
+                                            followMsg.takeIf { it.isNotBlank() }
+                                        ).joinToString(" | ")
+                                        Toast.makeText(this@MainActivity, toastText, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        )
                     }
 
                     // Identical CodeStation Floating Liquid Glass Navigation Bar
@@ -327,6 +380,17 @@ class MainActivity : ComponentActivity() {
                 val file = File(testPath)
                 if (file.exists()) {
                     handleImportCv(Uri.fromFile(file), settingsRepo)
+                }
+            }
+        } else if (intent?.getBooleanExtra("reset_pipeline", false) == true) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val count = ApplicationAutomationManager.resetPipelineToZero(this@MainActivity, settingsRepo)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Compteurs remis à 0 ($count dossier(s)) ✓",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         } else if (intent?.getBooleanExtra("reanalyze_cv", false) == true) {
@@ -371,8 +435,7 @@ class MainActivity : ComponentActivity() {
 
             val offers = scanner.scanOffers(profile)
             if (offers.isNotEmpty()) {
-                db.jobOfferDao().clearDetectedOffers()
-                db.jobOfferDao().insertAll(offers.map { JobOfferEntity.fromDomain(it) })
+                ApplicationAutomationManager.preserveEnrichmentsAndReplaceDetected(this@MainActivity, offers)
                 settingsRepo.update { it.copy(lastScanTimestamp = System.currentTimeMillis()) }
             }
             if (showToast) {

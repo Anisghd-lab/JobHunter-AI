@@ -42,7 +42,13 @@ data class JobOfferEntity(
     val deadlineLabel: String = "",
     val followUpCount: Int = 0,
     val lastFollowUpAt: Long = 0L,
-    val lastReplySummary: String = ""
+    val lastReplySummary: String = "",
+    val autoApplied: Boolean = false,
+    val lastAutoAttemptAt: Long = 0L,
+    val lastReplyFrom: String = "",
+    val lastReplySubject: String = "",
+    val lastReplyAt: Long = 0L,
+    val lastReplyMessageId: String = ""
 ) {
     fun toDomain(): JobOffer = JobOffer(
         id = id,
@@ -79,7 +85,13 @@ data class JobOfferEntity(
         deadlineLabel = deadlineLabel,
         followUpCount = followUpCount,
         lastFollowUpAt = lastFollowUpAt,
-        lastReplySummary = lastReplySummary
+        lastReplySummary = lastReplySummary,
+        autoApplied = autoApplied,
+        lastAutoAttemptAt = lastAutoAttemptAt,
+        lastReplyFrom = lastReplyFrom,
+        lastReplySubject = lastReplySubject,
+        lastReplyAt = lastReplyAt,
+        lastReplyMessageId = lastReplyMessageId
     )
 
     companion object {
@@ -118,7 +130,13 @@ data class JobOfferEntity(
             deadlineLabel = offer.deadlineLabel,
             followUpCount = offer.followUpCount,
             lastFollowUpAt = offer.lastFollowUpAt,
-            lastReplySummary = offer.lastReplySummary
+            lastReplySummary = offer.lastReplySummary,
+            autoApplied = offer.autoApplied,
+            lastAutoAttemptAt = offer.lastAutoAttemptAt,
+            lastReplyFrom = offer.lastReplyFrom,
+            lastReplySubject = offer.lastReplySubject,
+            lastReplyAt = offer.lastReplyAt,
+            lastReplyMessageId = offer.lastReplyMessageId
         )
     }
 }

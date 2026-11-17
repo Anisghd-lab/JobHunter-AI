@@ -88,6 +88,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun AgentScreen(
     settingsRepo: SettingsRepository,
+    todayAutoCount: Int = 0,
+    isRunningAutomation: Boolean = false,
+    onRunAutomationNowClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -202,6 +205,90 @@ fun AgentScreen(
                         )
                     }
                 }
+
+                Spacer(Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Email Direct Uniquement (100% Auto)",
+                            style = Type.bodySmall.bold,
+                            color = Palette.text
+                        )
+                        Text(
+                            text = "Actif (recommandé) = envoie uniquement aux offres avec email recruteur vérifié. Sinon prépare aussi les portails Web.",
+                            style = Type.label,
+                            color = Palette.secondary
+                        )
+                    }
+                    Switch(
+                        checked = settings.autoApplyEmailOnly,
+                        onCheckedChange = { emailOnly ->
+                            settingsRepo.update { it.copy(autoApplyEmailOnly = emailOnly) }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Palette.emeraldSolidBg
+                        )
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(5, 10, 15).forEach { maxPerDay ->
+                        GlassFilterChip(
+                            text = "Max $maxPerDay/j",
+                            selected = settings.autoApplyMaxPerDay == maxPerDay,
+                            selectedColor = Palette.emeraldSolidBg,
+                            onClick = { settingsRepo.update { it.copy(autoApplyMaxPerDay = maxPerDay) } }
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Palette.plateBackground, RoundedRectangle(10.dp))
+                        .padding(10.dp)
+                ) {
+                    Column {
+                        Text(
+                            text = "Aujourd'hui : $todayAutoCount / ${settings.autoApplyMaxPerDay} candidature(s) auto envoyée(s)",
+                            style = Type.label.bold.monospaced,
+                            color = Palette.emeraldAccent
+                        )
+                        if (settings.lastAutomationSummary.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = settings.lastAutomationSummary,
+                                style = Type.label,
+                                color = Palette.secondary
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                GlassSolidButton(
+                    text = if (isRunningAutomation) "Automatisation & IMAP en cours..." else "Lancer Auto-Candidature & Suivi",
+                    icon = Icons.Default.AutoAwesome,
+                    containerColor = Palette.emeraldSolidBg,
+                    isLoading = isRunningAutomation,
+                    onClick = onRunAutomationNowClick,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(Modifier.height(10.dp))
 

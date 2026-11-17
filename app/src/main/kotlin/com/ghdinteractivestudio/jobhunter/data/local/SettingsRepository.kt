@@ -82,6 +82,13 @@ data class AppSettings(
     val preferInstalledYahooApp: Boolean = false,
     val connectedYahooPackage: String = "",
     val smtpAuthPaused: Boolean = false,
+    val autoApplyEmailOnly: Boolean = true,
+    val autoApplyMaxPerCycle: Int = 3,
+    val autoApplyMaxPerDay: Int = 10,
+    val maxFollowUpsPerOffer: Int = 1,
+    val lastAutoApplyRunAt: Long = 0L,
+    val lastInboxCheckAt: Long = 0L,
+    val lastAutomationSummary: String = "",
     val isDarkTheme: Boolean = true,
     val lastScanTimestamp: Long = 0L
 ) {
@@ -143,6 +150,13 @@ class SettingsRepository private constructor(context: Context) {
             preferInstalledYahooApp = prefs.getBoolean("prefer_yahoo_app", false),
             connectedYahooPackage = prefs.getString("connected_yahoo_pkg", "") ?: "",
             smtpAuthPaused = prefs.getBoolean("smtp_auth_paused", false),
+            autoApplyEmailOnly = prefs.getBoolean("auto_apply_email_only", true),
+            autoApplyMaxPerCycle = prefs.getInt("auto_apply_max_cycle", 3),
+            autoApplyMaxPerDay = prefs.getInt("auto_apply_max_day", 10),
+            maxFollowUpsPerOffer = prefs.getInt("max_followups_offer", 1),
+            lastAutoApplyRunAt = prefs.getLong("last_auto_apply_ts", 0L),
+            lastInboxCheckAt = prefs.getLong("last_inbox_check_ts", 0L),
+            lastAutomationSummary = prefs.getString("last_auto_summary", "") ?: "",
             isDarkTheme = prefs.getBoolean("dark_theme", true),
             lastScanTimestamp = prefs.getLong("last_scan_ts", 0L)
         )
@@ -173,6 +187,13 @@ class SettingsRepository private constructor(context: Context) {
             putBoolean("prefer_yahoo_app", next.preferInstalledYahooApp)
             putString("connected_yahoo_pkg", next.connectedYahooPackage.trim())
             putBoolean("smtp_auth_paused", next.smtpAuthPaused)
+            putBoolean("auto_apply_email_only", next.autoApplyEmailOnly)
+            putInt("auto_apply_max_cycle", next.autoApplyMaxPerCycle)
+            putInt("auto_apply_max_day", next.autoApplyMaxPerDay)
+            putInt("max_followups_offer", next.maxFollowUpsPerOffer)
+            putLong("last_auto_apply_ts", next.lastAutoApplyRunAt)
+            putLong("last_inbox_check_ts", next.lastInboxCheckAt)
+            putString("last_auto_summary", next.lastAutomationSummary)
             putBoolean("dark_theme", next.isDarkTheme)
             putLong("last_scan_ts", next.lastScanTimestamp)
         }.apply()

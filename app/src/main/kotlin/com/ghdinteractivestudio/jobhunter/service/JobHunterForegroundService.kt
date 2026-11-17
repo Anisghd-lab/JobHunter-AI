@@ -37,7 +37,9 @@ class JobHunterForegroundService : Service() {
     companion object {
         private const val TAG = "JobHunterService"
         const val CHANNEL_ID = "jobhunter_24_7_channel"
+        const val EVENTS_CHANNEL_ID = "jobhunter_events_channel"
         const val NOTIFICATION_ID = 1001
+        const val EVENT_NOTIFICATION_ID = 1002
 
         fun startService(context: Context) {
             val intent = Intent(context, JobHunterForegroundService::class.java)
@@ -104,8 +106,7 @@ class JobHunterForegroundService : Service() {
                     val newOffers = if (shouldScan) {
                         val scanned = scanner.scanOffers(profile)
                         if (scanned.isNotEmpty()) {
-                            dao.clearDetectedOffers()
-                            dao.insertAll(scanned.map { JobOfferEntity.fromDomain(it) })
+                            ApplicationAutomationManager.preserveEnrichmentsAndReplaceDetected(applicationContext, scanned)
                             settingsRepo.update { it.copy(lastScanTimestamp = System.currentTimeMillis()) }
                         }
                         scanned
@@ -113,59 +114,52 @@ class JobHunterForegroundService : Service() {
                         emptyList()
                     }
 
-                    // Autonomous AI comparison + MLDP Cover Letter & Application Automation when CV is loaded
-                    var autoProcessedCount = 0
-                    if (newOffers.isNotEmpty() && profile != null && profile.combinedSearchCorpus().isNotBlank() && settings.hasAnyAiKey()) {
-                        val candidates = newOffers.filter { !DeadlineParser.isExpiredOrStale(it) }.take(3)
-                        for (candidate in candidates) {
-                            val existing = dao.getOfferById(candidate.id)
-                            if (existing != null && existing.status != JobStatus.DETECTED.name) continue
-
-                            val evalRes = ApplicationAutomationManager.evaluateOfferWithAi(
-                                context = applicationContext,
-                                offer = candidate,
-                                profile = profile,
-                                settings = settings,
-                                scanner = scanner
-                            )
-                            val evaluated = evalRes.getOrNull() ?: continue
-
-                            if (settings.autoApplyEnabled &&
-                                evaluated.matchScore >= settings.autoApplyMinScore &&
-                                !DeadlineParser.isExpiredOrStale(evaluated)
-                            ) {
-                                ApplicationAutomationManager.prepareAndApply(
-                                    context = applicationContext,
-                                    offer = evaluated,
-                                    profile = profile,
-                                    settings = settings,
-                                    scanner = scanner,
-                                    sendSilentEmailIfConfigured = true
-                                )
-                                autoProcessedCount++
-                            }
-                        }
-                    }
-
-                    // Autonomous IMAP Reply Detection + AI J+N Follow-Up Cycle
-                    var followUpSummary = ""
-                    if (profile != null && settings.aiAutonomousEmailControl && settings.hasEmailCredentials()) {
-                        val (followUpdates, summary) = ApplicationAutomationManager.runAutonomousEmailFollowUpCycle(
+                    // Autonomous Quota-Guarded Auto-Apply across top Room + new scan candidates
+                    val batchReport = if (profile != null && settings.autoApplyEnabled) {
+                        ApplicationAutomationManager.runAutonomousAutoApplyBatch(
                             context = applicationContext,
                             profile = profile,
-                            settings = settings
+                            settingsRepo = settingsRepo,
+                            scanner = scanner,
+                            forceRun = false
                         )
-                        if (followUpdates > 0) followUpSummary = summary
+                    } else null
+
+                    // Autonomous IMAP Reply Detection + AI J+N Follow-Up Cycle
+                    val liveSettings = settingsRepo.settings.value
+                    val followReport = if (profile != null && liveSettings.aiAutonomousEmailControl && liveSettings.canSendSilently()) {
+                        ApplicationAutomationManager.runAutonomousEmailFollowUpCycle(
+                            context = applicationContext,
+                            profile = profile,
+                            settingsRepo = settingsRepo
+                        )
+                    } else null
+
+                    // High-priority event alerts for real auto-applications or recruiter replies / interviews
+                    if (followReport != null && followReport.interviewAlerts.isNotEmpty()) {
+                        postEventNotification(
+                            "Invitation Entretien Détectée !",
+                            followReport.interviewAlerts.joinToString(" · ").take(140)
+                        )
+                    } else if (followReport != null && followReport.replyUpdatesCount > 0) {
+                        postEventNotification(
+                            "Nouvelle Réponse Recruteur (${followReport.replyUpdatesCount})",
+                            followReport.summary.take(140)
+                        )
+                    } else if (batchReport != null && batchReport.sentByEmailCount > 0) {
+                        postEventNotification(
+                            "Candidature(s) Envoyée(s) Auto (${batchReport.sentByEmailCount})",
+                            batchReport.summary.take(140)
+                        )
                     }
 
-                    if (newOffers.isNotEmpty() || followUpSummary.isNotBlank()) {
-                        val msg = when {
-                            followUpSummary.isNotBlank() -> followUpSummary.take(120)
-                            autoProcessedCount > 0 -> "${newOffers.size} offres actives · $autoProcessedCount candidature(s) auto"
-                            else -> "${newOffers.size} offres actives (DZ, Golfe & Monde)"
-                        }
-                        updateNotification("Veille & Suivi IA 24/7 Actifs", msg)
+                    val msg = when {
+                        followReport != null && followReport.updatedCount > 0 -> followReport.summary.take(120)
+                        batchReport != null && (batchReport.sentByEmailCount > 0 || batchReport.webPreparedCount > 0) -> batchReport.summary.take(120)
+                        newOffers.isNotEmpty() -> "${newOffers.size} offres actives (DZ, Golfe & Monde)"
+                        else -> liveSettings.lastAutomationSummary.ifBlank { "Veille & Suivi IMAP actifs" }.take(120)
                     }
+                    updateNotification("Veille & Suivi IA 24/7 Actifs", msg)
                 }.onFailure { err ->
                     Log.e(TAG, "Hunting loop error: ${err.message}", err)
                 }
@@ -178,6 +172,7 @@ class JobHunterForegroundService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "JobHunter 24/7 Agent",
@@ -186,9 +181,35 @@ class JobHunterForegroundService : Service() {
                 description = "Maintient l'agent autonome actif pour trouver et analyser des offres d'emploi réelles"
                 setShowBadge(false)
             }
-            val manager = getSystemService(NotificationManager::class.java)
+            val eventChannel = NotificationChannel(
+                EVENTS_CHANNEL_ID,
+                "Candidatures & Réponses Recruteurs",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Alertes lorsque l'IA postule automatiquement ou détecte une réponse recruteur"
+            }
             manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(eventChannel)
         }
+    }
+
+    private fun postEventNotification(title: String, text: String) {
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            1,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notif = NotificationCompat.Builder(this, EVENTS_CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(EVENT_NOTIFICATION_ID, notif)
     }
 
     private fun buildNotification(title: String, text: String): Notification {

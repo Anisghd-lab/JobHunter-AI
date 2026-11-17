@@ -205,45 +205,61 @@ Réponds UNIQUEMENT en JSON strict :
 
     /**
      * Generates a smart, targeted Cover Letter strictly following MLDP 7-part spatial structure:
-     * pre-filters CV skills, experiences, certifications and diplomas to include ONLY facts
-     * directly relevant to the target job offer (never a whole-CV dump).
+     * enforces 100% single-language output (strictly French OR strictly English matching the offer),
+     * anchors facts in the same-language CV slot when uploaded, and verifies zero language mixing.
      */
     suspend fun generateMldpCoverLetter(offer: JobOffer, profile: UserProfile): MldpCoverLetterData {
+        val migratedProfile = profile.migrateLegacySlotIfNeeded()
         val offerLangFrench = looksLikeFrenchOffer(offer)
-        val targeted = selectTargetedProfile(offer, profile)
+        val targeted = selectTargetedProfile(offer, migratedProfile)
 
-        val systemInstruction = "Tu rédiges des lettres de motivation exécutives ultra-ciblées selon la structure MLDP (Se présenter brièvement en lien avec le poste, Valoriser l'entreprise & exprimer ses attentes, Démontrer ses compétences clés pertinentes avec 1-2 preuves réelles du CV, Solliciter un entretien & renvoyer au CV ci-joint, Formule de politesse)."
+        val sameLangCvExcerpt = (if (offerLangFrench) {
+            migratedProfile.frenchCv?.rawText
+        } else {
+            migratedProfile.englishCv?.rawText
+        }).orEmpty().take(1800)
 
-        val skillsPrompt = targeted.skills.joinToString(", ").ifBlank { "Adaptabilité, organisation" }
+        val skillsPrompt = targeted.skills
+            .map { localizeCvTerm(it, offerLangFrench) }
+            .joinToString(", ")
+            .ifBlank { if (offerLangFrench) "Gestion administrative, coordination, organisation" else "Administration, coordination, operational organization" }
+
         val expPrompt = targeted.experiences.joinToString("; ") {
-            "${it.title} chez ${it.company} (${it.period}): ${it.description.take(220)}"
-        }.ifBlank { "Expérience transférable en coordination et gestion opérationnelle" }
+            val localizedTitle = localizeCvTerm(it.title, offerLangFrench)
+            "$localizedTitle — ${it.company} (${it.period}): ${it.description.take(200)}"
+        }.ifBlank {
+            if (offerLangFrench) "Expérience confirmée en coordination et gestion opérationnelle"
+            else "Proven experience in operational coordination and administration"
+        }
+
         val certPrompt = targeted.certifications.joinToString("; ") {
-            "${it.name}${if (it.issuer.isNotBlank()) " (${it.issuer})" else ""}"
+            "${localizeCvTerm(it.name, offerLangFrench)}${if (it.issuer.isNotBlank()) " (${it.issuer})" else ""}"
         }
         val eduPrompt = targeted.education?.let {
-            "${it.degree}${if (it.institution.isNotBlank()) " (${it.institution})" else ""}"
+            "${localizeCvTerm(it.degree, offerLangFrench)}${if (it.institution.isNotBlank()) " (${it.institution})" else ""}"
         } ?: ""
 
-        val prompt = """
+        val (systemInstruction, prompt) = if (offerLangFrench) {
+            val sys = "Tu rédiges des lettres de motivation exécutives ultra-ciblées selon la structure MLDP, STRICTEMENT en FRANÇAIS uniquement. Aucun mot ni phrase d'anglais n'est toléré dans la réponse."
+            val prm = """
 Rédige les 4 paragraphes d'une lettre de motivation ciblée selon la méthodologie MLDP au format JSON strict.
 
-RÈGLES STRICTES D'INTELLIGENCE & DE CIBLAGE :
-1. Langue : ${if (offerLangFrench) "FRANÇAIS" else "ANGLAIS professionnel"}.
-2. NE RÉCITE JAMAIS TOUT LE CV : cite UNIQUEMENT les compétences, l'expérience et la formation pré-sélectionnées ci-dessous qui répondent directement au poste "${offer.title}". INTERDICTION d'inventer quoi que ce soit et INTERDICTION d'ajouter des outils ou métiers hors sujet.
-3. Pas d'ouverture robotique « Je suis [Nom] » (le nom est déjà en en-tête et signature) et pas de liste exhaustive de tous les diplômes/certifications.
-4. Concision & impact : 2 à 4 phrases fluides par paragraphe (~40 à 60 mots), l'ensemble doit tenir sur 1 page A4 :
-   - "paragraphPresentAndRequest" : Accroche directe reliant le profil ciblé (${targeted.title}) à la candidature pour "${offer.title}" chez ${offer.company}.
-   - "paragraphExpectationsAndCompany" : Intérêt concret pour ${offer.company} / ses enjeux dans l'annonce et missions que le candidat souhaite prendre en charge.
+RÈGLES ABSOLUES :
+1. LANGUE UNIQUE : Rédige 100 % en FRANÇAIS PROFESSIONNEL soutenu. Traduis impérativement en français tout intitulé ou compétence du profil formulé en anglais. INTERDICTION STRICTE de laisser la moindre phrase ou expression en anglais.
+2. NE RÉCITE JAMAIS TOUT LE CV : cite UNIQUEMENT les compétences, l'expérience et la formation ciblées ci-dessous qui répondent directement au poste "${offer.title}".
+3. Pas d'ouverture robotique « Je suis [Nom] » (le nom figure déjà en en-tête et en signature).
+4. Concision & impact (2 à 4 phrases fluides par paragraphe, ~40 à 60 mots, format 1 page A4) :
+   - "paragraphPresentAndRequest" : Accroche directe reliant le profil ciblé à la candidature pour "${offer.title}" chez ${offer.company}.
+   - "paragraphExpectationsAndCompany" : Intérêt concret pour ${offer.company} / les enjeux du poste et la valeur ajoutée apportée.
    - "paragraphSelfValorization" : Mise en valeur UNIQUEMENT des compétences visées par l'offre ($skillsPrompt) appuyée par l'expérience pertinente${if (certPrompt.isNotBlank()) " et la certification utile" else ""}.
-   - "paragraphInterviewAndCvInvite" : Demande d'entretien concise et invitation naturelle à consulter le CV ci-joint.
-5. "closingFormula" : Formule de politesse complète MLDP.
+   - "paragraphInterviewAndCvInvite" : Demande d'entretien concise et invitation naturelle à consulter le CV en français ci-joint.
+5. "closingFormula" : Formule de politesse classique en français.
 
-Éléments du CV pré-filtrés pour CETTE offre uniquement :
-- Profil ciblé : ${targeted.title}
-- Compétences retenues pour ce poste : $skillsPrompt
+Éléments réels du candidat pré-filtrés pour cette offre :
+- Profil ciblé : ${localizeCvTerm(targeted.title, true)}
+- Compétences retenues : $skillsPrompt
 - Expérience(s) retenue(s) : $expPrompt
-${if (certPrompt.isNotBlank()) "- Certification(s) pertinente(s) : $certPrompt\n" else ""}${if (eduPrompt.isNotBlank() && targeted.educationDirectFit) "- Formation directe pour le poste : $eduPrompt\n" else ""}${if (targeted.languages.isNotEmpty()) "- Langues pertinentes : ${targeted.languages.joinToString(", ")}\n" else ""}
+${if (certPrompt.isNotBlank()) "- Certification(s) pertinente(s) : $certPrompt\n" else ""}${if (eduPrompt.isNotBlank() && targeted.educationDirectFit) "- Formation directe : $eduPrompt\n" else ""}${if (targeted.languages.isNotEmpty()) "- Langues pertinentes : ${targeted.languages.joinToString(", ")}\n" else ""}${if (sameLangCvExcerpt.isNotBlank()) "\nExtrait du CV français du candidat (source factuelle prioritaire) :\n$sameLangCvExcerpt\n" else ""}
 Offre ciblée :
 Poste : ${offer.title}
 Entreprise : ${offer.company}
@@ -253,16 +269,59 @@ ${offer.description.take(1800)}
 
 Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
 {
-  "isFrench": $offerLangFrench,
-  "subject": "${if (offerLangFrench) "Objet : Candidature au poste de ${offer.title}" else "Subject: Application for ${offer.title}"}",
-  "salutation": "${if (offerLangFrench) "Madame, Monsieur," else "Dear Hiring Manager,"}",
+  "isFrench": true,
+  "subject": "Objet : Candidature au poste de ${offer.title}",
+  "salutation": "Madame, Monsieur,",
   "paragraphPresentAndRequest": "...",
   "paragraphExpectationsAndCompany": "...",
   "paragraphSelfValorization": "...",
   "paragraphInterviewAndCvInvite": "...",
-  "closingFormula": "..."
+  "closingFormula": "Je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées."
 }
-        """.trimIndent()
+            """.trimIndent()
+            sys to prm
+        } else {
+            val sys = "You write concise executive MLDP cover letters STRICTLY in natural professional ENGLISH ONLY. Never write a single French sentence, header, or closing phrase."
+            val prm = """
+Write the 4 body paragraphs of a tailored cover letter in strict JSON following the 7-part business letter structure.
+
+STRICT NON-NEGOTIABLE RULES:
+1. SINGLE LANGUAGE ONLY: Write 100% in natural professional ENGLISH ONLY. If any detail from the candidate context below appears in French, translate it smoothly into natural English. NEVER leave any French sentence, connector, or greeting anywhere in the JSON.
+2. NEVER DUMP THE WHOLE CV: cite ONLY the pre-selected relevant skills, experience, and credentials below that directly answer "${offer.title}". Zero fabricated facts.
+3. Avoid robotic openings like "My name is..." (your name is already in the header and signature).
+4. Crisp executive pace (2 to 4 fluent sentences per paragraph, ~40 to 60 words each, fitting cleanly on 1 A4 page):
+   - "paragraphPresentAndRequest": Direct opening connecting the targeted background to your application for "${offer.title}" at ${offer.company}.
+   - "paragraphExpectationsAndCompany": Genuine alignment with ${offer.company}, its goals, and the key responsibilities of the role.
+   - "paragraphSelfValorization": Concrete evidence highlighting ONLY the targeted competencies ($skillsPrompt) backed by relevant experience${if (certPrompt.isNotBlank()) " and relevant certification" else ""}.
+   - "paragraphInterviewAndCvInvite": Confident request for an interview and invitation to review the attached English CV.
+5. "closingFormula": Standard English business closing (e.g., "Thank you in advance for your time and consideration. I look forward to hearing from you. Yours sincerely,").
+
+Pre-filtered real candidate context for THIS role only:
+- Targeted profile: ${localizeCvTerm(targeted.title, false)}
+- Selected relevant skills: $skillsPrompt
+- Relevant experience: $expPrompt
+${if (certPrompt.isNotBlank()) "- Relevant certification(s): $certPrompt\n" else ""}${if (eduPrompt.isNotBlank() && targeted.educationDirectFit) "- Direct education fit: $eduPrompt\n" else ""}${if (targeted.languages.isNotEmpty()) "- Relevant languages: ${targeted.languages.joinToString(", ")}\n" else ""}${if (sameLangCvExcerpt.isNotBlank()) "\nCandidate's English CV excerpt (primary factual reference):\n$sameLangCvExcerpt\n" else ""}
+Target job posting:
+Role: ${offer.title}
+Company: ${offer.company}
+Location: ${offer.location}
+Description:
+${offer.description.take(1800)}
+
+Reply ONLY with valid pure JSON (no markdown code fences):
+{
+  "isFrench": false,
+  "subject": "Subject: Application for ${offer.title}",
+  "salutation": "Dear Hiring Manager,",
+  "paragraphPresentAndRequest": "...",
+  "paragraphExpectationsAndCompany": "...",
+  "paragraphSelfValorization": "...",
+  "paragraphInterviewAndCvInvite": "...",
+  "closingFormula": "Thank you in advance for your time and consideration. I look forward to hearing from you. Yours sincerely,"
+}
+            """.trimIndent()
+            sys to prm
+        }
 
         val aiPayload = LlmClient.generateWithFreeFallback(settings, prompt, systemInstruction)
             .mapCatching { resp ->
@@ -270,43 +329,55 @@ Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
                 json.decodeFromString<MldpLetterAiPayload>(cleanJson)
             }.getOrNull()
 
-        return if (aiPayload != null && aiPayload.paragraphPresentAndRequest.isNotBlank()) {
-            val isFr = aiPayload.isFrench
-            val paragraphs = listOf(
-                aiPayload.paragraphPresentAndRequest,
-                aiPayload.paragraphExpectationsAndCompany,
-                aiPayload.paragraphSelfValorization,
-                aiPayload.paragraphInterviewAndCvInvite
-            ).filter { it.isNotBlank() }
+        val deterministic = buildDeterministicMldpLetter(offer, migratedProfile, targeted, offerLangFrench)
 
-            MldpCoverLetterData(
-                senderName = profile.fullName.ifBlank { "Candidat" },
-                senderAddress = profile.address,
-                senderPhone = profile.phone,
-                senderEmail = profile.email,
-                recipientCompany = offer.company.ifBlank { if (isFr) "Direction des Ressources Humaines" else "Hiring Team" },
-                recipientAttention = if (isFr) "À l'attention du Service Recrutement" else "Attn: Recruitment Team",
-                recipientLocation = offer.location,
-                placeAndDate = MldpCoverLetterData.formatCurrentPlaceAndDate(profile.address, isFr),
-                subject = aiPayload.subject.ifBlank {
-                    if (isFr) "Objet : Candidature au poste de ${offer.title}" else "Subject: Application for ${offer.title}"
-                },
-                salutation = aiPayload.salutation.ifBlank {
-                    if (isFr) "Madame, Monsieur," else "Dear Hiring Manager,"
-                },
-                bodyParagraphs = paragraphs,
-                closingFormula = aiPayload.closingFormula.ifBlank {
-                    if (isFr) {
-                        "Je vous remercie par avance de l'attention que vous voudriez bien porter à ma candidature et reste à votre disposition pour convenir d'un entretien. Dans cette attente, je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées."
-                    } else {
-                        "Thank you in advance for your consideration of my application. I remain at your disposal to arrange an interview and look forward to hearing from you."
-                    }
-                },
-                signatureName = profile.fullName.ifBlank { "Candidat" }
-            )
-        } else {
-            buildDeterministicMldpLetter(offer, profile, targeted, offerLangFrench)
+        if (aiPayload == null || aiPayload.paragraphPresentAndRequest.isBlank()) {
+            return deterministic
         }
+
+        val isFr = offerLangFrench
+        val rawAiParagraphs = listOf(
+            aiPayload.paragraphPresentAndRequest,
+            aiPayload.paragraphExpectationsAndCompany,
+            aiPayload.paragraphSelfValorization,
+            aiPayload.paragraphInterviewAndCvInvite
+        )
+        // Strictly reject/replace any single paragraph that leaked into the wrong language
+        val validatedParagraphs = rawAiParagraphs.mapIndexed { idx, para ->
+            val clean = para.trim()
+            if (clean.length >= 25 && isStrictlyTargetLanguage(clean, isFr)) {
+                clean
+            } else {
+                deterministic.bodyParagraphs.getOrElse(idx) { "" }
+            }
+        }.filter { it.isNotBlank() }
+
+        val validSubject = aiPayload.subject.trim()
+            .takeIf { it.isNotBlank() && isStrictlyTargetLanguage(it, isFr) }
+            ?: deterministic.subject
+        val validSalutation = aiPayload.salutation.trim()
+            .takeIf { it.isNotBlank() && isStrictlyTargetLanguage(it, isFr) }
+            ?: deterministic.salutation
+        val validClosing = aiPayload.closingFormula.trim()
+            .takeIf { it.isNotBlank() && isStrictlyTargetLanguage(it, isFr) }
+            ?: deterministic.closingFormula
+
+        return MldpCoverLetterData(
+            senderName = deterministic.senderName,
+            senderAddress = deterministic.senderAddress,
+            senderPhone = deterministic.senderPhone,
+            senderEmail = deterministic.senderEmail,
+            recipientCompany = deterministic.recipientCompany,
+            recipientAttention = deterministic.recipientAttention,
+            recipientLocation = deterministic.recipientLocation,
+            placeAndDate = deterministic.placeAndDate,
+            subject = validSubject,
+            salutation = validSalutation,
+            bodyParagraphs = validatedParagraphs.ifEmpty { deterministic.bodyParagraphs },
+            closingFormula = validClosing,
+            signatureName = deterministic.signatureName,
+            isFrench = isFr
+        )
     }
 
     suspend fun generateCoverLetter(offer: JobOffer, profile: UserProfile): Result<String> =
@@ -319,69 +390,71 @@ Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
         isFrench: Boolean
     ): MldpCoverLetterData {
         val topExp = targeted.experiences.firstOrNull()
-        val skillsText = targeted.skills.take(4).joinToString(", ")
-        val topCert = targeted.certifications.firstOrNull()
-        val edu = targeted.education
+        val localizedTitle = localizeCvTerm(targeted.title.ifBlank { offer.title }, isFrench)
+        val localizedExpTitle = topExp?.let { localizeCvTerm(it.title, isFrench) }.orEmpty()
+        val skillsText = targeted.skills.take(4).joinToString(", ") { localizeCvTerm(it, isFrench) }
+        val topCert = targeted.certifications.firstOrNull()?.let { localizeCvTerm(it.name, isFrench) }
+        val edu = targeted.education?.let { localizeCvTerm(it.degree, isFrench) }
 
         val paragraphs = if (isFrench) {
             listOf(
                 buildString {
                     when {
-                        targeted.educationDirectFit && edu != null ->
-                            append("Titulaire d'un ${edu.degree}")
+                        targeted.educationDirectFit && !edu.isNullOrBlank() ->
+                            append("Titulaire d'un $edu")
                         topExp != null ->
-                            append("Fort(e) d'une expérience confirmée en tant que ${topExp.title} chez ${topExp.company}")
+                            append("Fort(e) d'une expérience confirmée en tant que $localizedExpTitle chez ${topExp.company}")
                         else ->
-                            append("Professionnel(le) spécialisé(e) en ${targeted.title.ifBlank { offer.title }}")
+                            append("Professionnel(le) spécialisé(e) en $localizedTitle")
                     }
                     append(", je souhaite vous soumettre ma candidature pour le poste de ${offer.title} au sein de ${offer.company}.")
                 },
                 "Votre entreprise reconnue dans son secteur constitue un environnement stimulant où je pourrais m'investir pleinement sur les missions clés du poste, tout en contribuant avec rigueur à l'organisation et aux objectifs de vos équipes.",
                 buildString {
                     if (topExp != null && skillsText.isNotBlank()) {
-                        append("Mon parcours en qualité de ${topExp.title} chez ${topExp.company} m'a permis de développer une solide maîtrise en $skillsText")
+                        append("Mon parcours en qualité de $localizedExpTitle chez ${topExp.company} m'a permis de développer une solide maîtrise en $skillsText")
                     } else if (skillsText.isNotBlank()) {
                         append("Mes réalisations m'ont permis de consolider des compétences ciblées en $skillsText")
                     }
-                    if (topCert != null) {
-                        append(", complétée par ma certification en ${topCert.name}")
+                    if (!topCert.isNullOrBlank()) {
+                        append(", complétée par ma certification en $topCert")
                     }
                     append(".")
                     if (targeted.languages.isNotEmpty()) {
                         append(" La maîtrise des langues (${targeted.languages.joinToString(", ")}) viendra également appuyer mes échanges au quotidien.")
                     }
                 }.trim(),
-                "Je serais ravi(e) de vous rencontrer lors d'un entretien pour échanger sur ma contribution au sein de ${offer.company}. Vous trouverez ci-joint mon CV qui détaille l'ensemble de mon parcours."
+                "Je serais ravi(e) de vous rencontrer lors d'un entretien pour échanger sur ma contribution au sein de ${offer.company}. Vous trouverez ci-joint mon CV en français détaillant l'ensemble de mon parcours."
             )
         } else {
             listOf(
                 buildString {
                     when {
-                        targeted.educationDirectFit && edu != null ->
-                            append("Holding a ${edu.degree}")
+                        targeted.educationDirectFit && !edu.isNullOrBlank() ->
+                            append("Holding a $edu")
                         topExp != null ->
-                            append("Drawing on my hands-on experience as ${topExp.title} at ${topExp.company}")
+                            append("Drawing on my hands-on experience as $localizedExpTitle at ${topExp.company}")
                         else ->
-                            append("As an experienced ${targeted.title.ifBlank { offer.title }}")
+                            append("As an experienced $localizedTitle")
                     }
                     append(", I am eager to apply for the ${offer.title} position at ${offer.company}.")
                 },
-                "${offer.company} stands out as an organization where I can immediately contribute to your team's objectives while bringing structure, reliability and operational focus to the role.",
+                "${offer.company} stands out as an organization where I can immediately contribute to your team's objectives while bringing structure, reliability, and operational focus to the role.",
                 buildString {
                     if (topExp != null && skillsText.isNotBlank()) {
-                        append("In my role as ${topExp.title} at ${topExp.company}, I developed proven expertise in $skillsText")
+                        append("In my role as $localizedExpTitle at ${topExp.company}, I developed proven expertise in $skillsText")
                     } else if (skillsText.isNotBlank()) {
                         append("Through my background, I have built strong targeted capabilities in $skillsText")
                     }
-                    if (topCert != null) {
-                        append(", reinforced by my ${topCert.name} certification")
+                    if (!topCert.isNullOrBlank()) {
+                        append(", reinforced by my $topCert certification")
                     }
                     append(".")
                     if (targeted.languages.isNotEmpty()) {
                         append(" My language proficiency (${targeted.languages.joinToString(", ")}) further supports smooth cross-team collaboration.")
                     }
                 }.trim(),
-                "I would welcome the opportunity to discuss how my background aligns with ${offer.company}'s needs in an interview. Please find my attached CV for a complete overview of my track record."
+                "I would welcome the opportunity to discuss how my background aligns with ${offer.company}'s needs in an interview. Please find my attached English CV for a complete overview of my track record."
             )
         }
 
@@ -390,7 +463,7 @@ Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
             senderAddress = profile.address,
             senderPhone = profile.phone,
             senderEmail = profile.email,
-            recipientCompany = offer.company.ifBlank { if (isFrench) "Service Recrutement" else "Hiring Team" },
+            recipientCompany = offer.company.ifBlank { if (isFrench) "Service Recrutement" else "Recruitment Team" },
             recipientAttention = if (isFrench) "À l'attention du Service Recrutement" else "Attn: Recruitment Team",
             recipientLocation = offer.location,
             placeAndDate = MldpCoverLetterData.formatCurrentPlaceAndDate(profile.address, isFrench = isFrench),
@@ -400,10 +473,68 @@ Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
             closingFormula = if (isFrench) {
                 "Je vous remercie par avance de l'attention que vous voudriez bien porter à ma candidature et me tiens à votre entière disposition pour convenir d'un rendez-vous. Dans cette attente, je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations les plus distinguées."
             } else {
-                "Thank you in advance for your time and consideration of my application. I remain at your disposal for an interview and look forward to hearing from you."
+                "Thank you in advance for your time and consideration of my application. I look forward to discussing my candidacy in an interview. Yours sincerely,"
             },
-            signatureName = profile.fullName.ifBlank { "Candidat" }
+            signatureName = profile.fullName.ifBlank { "Candidat" },
+            isFrench = isFrench
         )
+    }
+
+    private fun isStrictlyTargetLanguage(text: String, targetIsFrench: Boolean): Boolean {
+        val padded = " " + text.lowercase().replace(Regex("[^a-zà-ÿ0-9']"), " ").replace(Regex("\\s+"), " ") + " "
+        val frMarkers = listOf(
+            " je ", " j'", " vous ", " mon ", " ma ", " mes ", " votre ", " vos ", " notre ",
+            " au sein ", " candidature ", " poste ", " entretien ", " salutations ", " madame ",
+            " monsieur ", " veuillez ", " compétence", " expérience", " parcours ", " pour le ", " de la ", " dans le "
+        )
+        val enMarkers = listOf(
+            " i ", " i'm ", " i am ", " i have ", " i would ", " my ", " your ", " our ",
+            " hiring manager", " dear ", " sincerely", " thank you ", " looking forward",
+            " please find", " attached cv", " in my role ", " drawing on ", " stands out as",
+            " through my ", " would welcome ", " for the ", " at your convenience"
+        )
+        val frHits = frMarkers.count { padded.contains(it) }
+        val enHits = enMarkers.count { padded.contains(it) }
+        return if (targetIsFrench) {
+            // Reject any paragraph containing clear English sentences/structures
+            enHits == 0
+        } else {
+            // Reject any paragraph containing French connectors/sentences
+            frHits == 0
+        }
+    }
+
+    private fun localizeCvTerm(raw: String, toFrench: Boolean): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return trimmed
+        val pairs = listOf(
+            "Administrative Manager" to "Responsable Administratif",
+            "Human Resources & Administrative Coordinator" to "Coordinateur Ressources Humaines & Administratif",
+            "Human Resources Administration" to "Administration des Ressources Humaines",
+            "Human Resources Management" to "Gestion des Ressources Humaines",
+            "Human Resources" to "Ressources Humaines",
+            "Compensation and Payroll Management" to "Gestion de la Paie et Rémunération",
+            "Payroll Support" to "Gestion de la Paie",
+            "Payroll Management" to "Gestion de la Paie",
+            "HR Compliance" to "Conformité RH",
+            "Administrative Coordination" to "Coordination Administrative",
+            "Office Administration" to "Gestion Administrative",
+            "Staffing & Recruitment" to "Recrutement & Intégration",
+            "Recruitment" to "Recrutement",
+            "Onboarding" to "Intégration des collaborateurs",
+            "Attendance Monitoring" to "Suivi des pointages et absences",
+            "French Teacher" to "Enseignant de Français",
+            "Project Coordinator" to "Coordinateur de Projet"
+        )
+        var result = trimmed
+        for ((en, fr) in pairs) {
+            result = if (toFrench) {
+                result.replace(en, fr, ignoreCase = true)
+            } else {
+                result.replace(fr, en, ignoreCase = true)
+            }
+        }
+        return result
     }
 
     private data class TargetedCvContext(
@@ -717,12 +848,28 @@ Où VERDICT est STRICTEMENT un de : INTERVIEW, REJECTED, ACK
     }
 
     private fun looksLikeFrenchOffer(offer: JobOffer): Boolean {
-        val sample = "${offer.title} ${offer.description.take(600)}".lowercase()
-        val frHints = listOf("responsable", "gestionnaire", "administratif", "cadre ", "assistant", "poste ", "nous recherchons", "missions ", "profil ", "algérie", "candidature", "expérience", "entreprise", "cdd", "cdi")
-        val enHints = listOf("requirements", "responsibilities", "we are looking for", "full-time", "apply now", "experience with", "salary", "united arab emirates", "saudi arabia", "qatar", "dubai", "riyadh", "doha", "remote ")
+        val sample = " ${offer.title} ${offer.description.take(900)} ".lowercase()
+        val frHints = listOf(
+            "responsable", "gestionnaire", "administratif", "administrative", "cadre ",
+            "assistant", "assistante", "poste ", "nous recherchons", "missions ", "profil ",
+            "algérie", "alger", "candidature", "expérience", "entreprise", "cdd", "cdi",
+            "recrutement", "ressources humaines", "h/f", "f/h", "paie", "comptable",
+            "maîtrise", "vous êtes", "votre rôle", "tâches", "diplôme", "niveau "
+        )
+        val enHints = listOf(
+            "requirements", "responsibilities", "qualifications", "we are looking for",
+            "full-time", "apply now", "experience with", "experience in", "salary",
+            "benefits", "about the role", "what you will", "what you'll", "who we are",
+            "bachelor", "years of experience", "united arab emirates", "saudi arabia",
+            "qatar", "dubai", "riyadh", "doha", "remote ", "human resources", "partner"
+        )
         val frScore = frHints.count { sample.contains(it) }
         val enScore = enHints.count { sample.contains(it) }
-        return if (frScore == 0 && enScore == 0) offer.regionScope == "ALGERIA" else frScore > enScore
+        return when {
+            frScore == 0 && enScore == 0 -> offer.regionScope == "ALGERIA"
+            frScore == enScore -> offer.regionScope == "ALGERIA"
+            else -> frScore > enScore
+        }
     }
 
     private fun extractJsonObject(raw: String): String {

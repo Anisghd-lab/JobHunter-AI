@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
@@ -36,6 +38,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -46,6 +51,7 @@ import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomatio
 import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
 import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
+import com.ghdinteractivestudio.jobhunter.ui.components.GlassFilterChip
 import com.ghdinteractivestudio.jobhunter.ui.components.GlassSoftButton
 import com.ghdinteractivestudio.jobhunter.ui.components.GlassSolidButton
 import com.ghdinteractivestudio.jobhunter.ui.components.glassCard
@@ -63,11 +69,21 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private enum class PipelineFilter(val label: String) {
+    ALL("Toutes"),
+    AUTO("Auto-Postulées"),
+    REPLIES("Réponses Boîte"),
+    INTERVIEWS("Entretiens"),
+    WEB("Portails Web")
+}
+
 @Composable
 fun PipelineScreen(
     allOffersFlow: StateFlow<List<JobOffer>>,
+    lastInboxCheckAt: Long = 0L,
     isCheckingFollowUp: Boolean = false,
     onRunAiFollowUpClick: () -> Unit = {},
+    onResetCountersClick: () -> Unit = {},
     onSendFollowUpClick: (JobOffer) -> Unit = {},
     onUpdateStatus: (JobOffer, JobStatus) -> Unit,
     onPrepareOrDispatchClick: (JobOffer) -> Unit,
@@ -75,13 +91,28 @@ fun PipelineScreen(
     modifier: Modifier = Modifier
 ) {
     val allOffers by allOffersFlow.collectAsState()
+    var activeFilter by remember { mutableStateOf(PipelineFilter.ALL) }
 
     // Strictly track REAL analyzed, ready, applied, interview or rejected candidatures (NEVER raw radar scan or archived noise)
     val trackedApps = allOffers.filter { it.status != JobStatus.DETECTED && it.status != JobStatus.ARCHIVED }
 
     val totalApplied = trackedApps.count { it.status == JobStatus.APPLIED }
+    val totalAuto = trackedApps.count { it.autoApplied }
     val totalInterview = trackedApps.count { it.status == JobStatus.INTERVIEW }
+    val totalReplies = trackedApps.count { it.lastReplyFrom.isNotBlank() || it.lastReplySummary.isNotBlank() || it.status == JobStatus.REJECTED }
     val totalPending = trackedApps.count { it.status == JobStatus.READY_TO_SEND || it.status == JobStatus.ANALYZED }
+
+    val filteredApps = remember(trackedApps, activeFilter) {
+        when (activeFilter) {
+            PipelineFilter.ALL -> trackedApps
+            PipelineFilter.AUTO -> trackedApps.filter { it.autoApplied }
+            PipelineFilter.REPLIES -> trackedApps.filter { it.lastReplyFrom.isNotBlank() || it.lastReplySummary.isNotBlank() || it.status == JobStatus.REJECTED }
+            PipelineFilter.INTERVIEWS -> trackedApps.filter { it.status == JobStatus.INTERVIEW }
+            PipelineFilter.WEB -> trackedApps.filter { it.status == JobStatus.READY_TO_SEND || it.status == JobStatus.ANALYZED }
+        }
+    }
+
+    val timeFormat = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
 
     Column(
         modifier = modifier
@@ -90,10 +121,10 @@ fun PipelineScreen(
     ) {
         Spacer(Modifier.height(16.dp))
 
-        // Metrics Banner (CodeStation Inspired)
+        // Metrics Banner (CodeStation Inspired - 4 live counters)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             MetricCard(
                 title = "Envoyées",
@@ -108,41 +139,96 @@ fun PipelineScreen(
                 modifier = Modifier.weight(1f)
             )
             MetricCard(
-                title = "À Finaliser",
+                title = "Réponses",
+                count = totalReplies,
+                color = Color(0xFF38BDF8),
+                modifier = Modifier.weight(1f)
+            )
+            MetricCard(
+                title = "Web",
                 count = totalPending,
                 color = Palette.attention,
                 modifier = Modifier.weight(1f)
             )
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
 
-        GlassSoftButton(
-            text = if (isCheckingFollowUp) "Analyse boîte & relances IA..." else "Suivi Réponses & Relances IA",
-            icon = Icons.Default.Sync,
-            accentColor = Palette.emeraldAccent,
-            isLoading = isCheckingFollowUp,
-            height = 40.dp,
-            onClick = onRunAiFollowUpClick,
-            modifier = Modifier.fillMaxWidth()
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            GlassSolidButton(
+                text = if (isCheckingFollowUp) "Sync Boîte..." else "Sync Boîte & Relances",
+                icon = Icons.Default.Sync,
+                containerColor = Palette.emeraldSolidBg,
+                isLoading = isCheckingFollowUp,
+                height = 40.dp,
+                onClick = onRunAiFollowUpClick,
+                modifier = Modifier.weight(1.35f)
+            )
+            GlassSoftButton(
+                text = "Remettre à 0",
+                icon = Icons.Default.DeleteOutline,
+                accentColor = Palette.attention,
+                height = 40.dp,
+                onClick = onResetCountersClick,
+                modifier = Modifier.weight(1f)
+            )
+        }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(8.dp))
 
         Text(
-            text = "SUIVI RÉEL DES CANDIDATURES (${trackedApps.size})",
+            text = if (lastInboxCheckAt > 0L) {
+                "📬 Boîte IMAP contrôlée le ${timeFormat.format(Date(lastInboxCheckAt))}"
+            } else {
+                "📬 Boîte IMAP prête pour la vérification en lecture seule"
+            },
+            style = Type.label.monospaced,
+            color = Palette.secondary
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(
+                PipelineFilter.ALL to "Toutes (${trackedApps.size})",
+                PipelineFilter.AUTO to "Auto ($totalAuto)",
+                PipelineFilter.REPLIES to "Réponses ($totalReplies)",
+                PipelineFilter.INTERVIEWS to "Entretiens ($totalInterview)",
+                PipelineFilter.WEB to "Web ($totalPending)"
+            ).forEach { (filter, label) ->
+                GlassFilterChip(
+                    text = label,
+                    selected = activeFilter == filter,
+                    selectedColor = Palette.blueSolidBg,
+                    onClick = { activeFilter = filter }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            text = "SUIVI RÉEL DES CANDIDATURES (${filteredApps.size})",
             style = Type.mono.bold,
             color = Palette.secondary
         )
 
         Spacer(Modifier.height(10.dp))
 
-        if (trackedApps.isEmpty()) {
+        if (filteredApps.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .glassCard()
-                    .padding(32.dp),
+                    .padding(28.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -154,13 +240,13 @@ fun PipelineScreen(
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Aucune candidature active pour l'instant.",
+                        text = if (trackedApps.isEmpty()) "Compteurs à zéro — prêt pour l'automatisation." else "Aucune candidature dans ce filtre.",
                         style = Type.bodySmall.bold,
                         color = Palette.text
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "Comparez une offre dans le Radar ou lancez « Postuler » pour voir vos dossiers suivis ici avec liens, CV, lettres et statuts réels.",
+                        text = "Dès que l'IA postule par email ou détecte une réponse dans votre boîte Yahoo, chaque dossier s'actualise ici automatiquement.",
                         style = Type.label,
                         color = Palette.secondary
                     )
@@ -171,7 +257,7 @@ fun PipelineScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(trackedApps, key = { it.id }) { app ->
+                items(filteredApps, key = { it.id }) { app ->
                     ApplicationTrackingCard(
                         app = app,
                         onUpdateStatus = { newStatus -> onUpdateStatus(app, newStatus) },
@@ -276,7 +362,22 @@ fun ApplicationTrackingCard(
                     )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (app.autoApplied) {
+                        Box(
+                            modifier = Modifier
+                                .background(Palette.emeraldAccent.copy(alpha = 0.16f), Capsule())
+                                .border(0.5.dp, Palette.emeraldAccent.copy(alpha = 0.4f), Capsule())
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "AUTO",
+                                style = Type.label.bold.monospaced,
+                                color = Palette.emeraldAccent
+                            )
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
                             .background(statusColor.copy(alpha = 0.16f), Capsule())
@@ -307,6 +408,16 @@ fun ApplicationTrackingCard(
                 style = Type.label,
                 color = Palette.secondary
             )
+            if (app.recruiterEmail.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "✉️ ${app.recruiterEmail}",
+                    style = Type.label.monospaced,
+                    color = Palette.electricBlue,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
 
             if (app.tags.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
@@ -435,14 +546,43 @@ fun ApplicationTrackingCard(
 
             Spacer(Modifier.height(8.dp))
 
-            // Pipeline Reply & Deadline Summary + Uniform Action Buttons
-            if (app.lastReplySummary.isNotBlank() || app.followUpCount > 0) {
+            // Pipeline Inbox Reply & Deadline Summary + Uniform Action Buttons
+            if (app.lastReplySummary.isNotBlank() || app.lastReplyFrom.isNotBlank() || app.followUpCount > 0) {
                 val followSuffix = if (app.followUpCount > 0) " (${app.followUpCount} relance(s))" else ""
-                Text(
-                    text = "🤖 Suivi IA$followSuffix : ${app.lastReplySummary.ifBlank { "En attente de retour" }}",
-                    style = Type.label.bold,
-                    color = Palette.electricBlue
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Palette.plateBackground, RoundedRectangle(8.dp))
+                        .border(0.5.dp, Palette.electricBlue.copy(alpha = 0.35f), RoundedRectangle(8.dp))
+                        .padding(8.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "📬 Boîte de réception$followSuffix : ${app.lastReplySummary.ifBlank { "En attente de retour" }}",
+                            style = Type.label.bold,
+                            color = Palette.electricBlue
+                        )
+                        if (app.lastReplyFrom.isNotBlank()) {
+                            Text(
+                                text = "De : ${app.lastReplyFrom}",
+                                style = Type.label.monospaced,
+                                color = Palette.text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (app.lastReplySubject.isNotBlank()) {
+                            val dateTag = if (app.lastReplyAt > 0L) " · ${dateFormat.format(Date(app.lastReplyAt))}" else ""
+                            Text(
+                                text = "Objet : ${app.lastReplySubject}$dateTag",
+                                style = Type.label,
+                                color = Palette.secondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(6.dp))
             }
 

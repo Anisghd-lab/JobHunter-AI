@@ -36,7 +36,9 @@ data class MldpCoverLetterData(
     val closingFormula: String,
 
     // 7. Signature (Bas-Droite)
-    val signatureName: String
+    val signatureName: String,
+
+    val isFrench: Boolean = true
 ) {
     fun toPlainText(): String = buildString {
         // 1. Lieu et date en haut à droite + coordonnées expéditeur en haut à gauche
@@ -44,8 +46,8 @@ data class MldpCoverLetterData(
         appendLine()
         appendLine(senderName)
         if (senderAddress.isNotBlank()) appendLine(senderAddress)
-        if (senderPhone.isNotBlank()) appendLine("Tél : $senderPhone")
-        if (senderEmail.isNotBlank()) appendLine("Email : $senderEmail")
+        if (senderPhone.isNotBlank()) appendLine(if (isFrench) "Tél : $senderPhone" else "Tel: $senderPhone")
+        if (senderEmail.isNotBlank()) appendLine("Email: $senderEmail")
         appendLine()
 
         // 2. Coordonnées destinataire
@@ -75,8 +77,62 @@ data class MldpCoverLetterData(
     }.trim()
 
     companion object {
+        private val KNOWN_CITIES = listOf(
+            "Oum El Bouaghi", "Sidi Bel Abbès", "Bordj Bou Arréridj", "Tizi Ouzou",
+            "Aïn Témouchent", "Ain Temouchent", "Aïn Defla", "Ain Defla",
+            "Souk Ahras", "Hassi Messaoud", "El Oued", "El Tarf", "El Bayadh",
+            "In Salah", "Abu Dhabi", "Ras Al Khaimah", "Kuwait City",
+            "Constantine", "Mostaganem", "Tébessa", "Tlemcen", "Khenchela",
+            "Boumerdès", "Ghardaïa", "Annaba", "Béjaïa", "Bejaia", "Biskra",
+            "Ouargla", "Laghouat", "Skikda", "Guelma", "Tiaret", "Relizane",
+            "Mascara", "Tindouf", "Adrar", "Béchar", "Batna", "Sétif", "Setif",
+            "Blida", "Chlef", "Médéa", "Medea", "Bouira", "Tipaza", "Mila",
+            "Jijel", "M'Sila", "Msila", "Saïda", "Saida", "Alger", "Algiers", "Oran",
+            "Riyadh", "Jeddah", "Dammam", "Khobar", "Dubai", "Sharjah",
+            "Doha", "Al Rayyan", "Muscat", "Manama", "Paris", "Lyon"
+        )
+
+        private val NON_CITY_COUNTRIES = setOf(
+            "algerie", "algérie", "algeria", "dz", "france", "maroc", "morocco",
+            "tunisie", "tunisia", "uae", "ksa", "qatar", "kuwait", "oman", "bahrain"
+        )
+
+        fun extractCityName(address: String, isFrench: Boolean): String {
+            val raw = address.trim()
+            if (raw.isBlank()) return if (isFrench) "Algérie" else "Algeria"
+
+            val lowerRaw = raw.lowercase()
+            KNOWN_CITIES.firstOrNull { lowerRaw.contains(it.lowercase()) }?.let { return it }
+
+            val cleaned = raw
+                .replace(Regex("""\(\s*\d{4,6}\s*\)"""), " ")
+                .replace(Regex("""\b\d{4,6}\b"""), " ")
+                .replace(Regex("""(?i)\b(n°|no\.?|numéro)\s*\w+"""), " ")
+
+            val segments = cleaned.split(",", "|", "-", "\n")
+                .map { it.trim() }
+                .filter { seg ->
+                    val segLow = seg.lowercase()
+                    seg.isNotBlank() &&
+                        segLow !in NON_CITY_COUNTRIES &&
+                        !Regex("""^(cité|cite|rue|avenue|av\.?|boulevard|bd|lot|lotissement|résidence|residence|bâtiment|batiment|bt\.?|quartier|bp|p\.o\.)\b""", RegexOption.IGNORE_CASE).containsMatchIn(segLow)
+                }
+
+            val best = (segments.lastOrNull() ?: cleaned)
+                .replace(Regex("""(?i)\b(algérie|algerie|algeria|france|saudi arabia|uae)\b"""), "")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+
+            if (best.isBlank()) return if (isFrench) "Algérie" else "Algeria"
+            return best.split(" ")
+                .filter { it.isNotBlank() }
+                .joinToString(" ") { w ->
+                    w.lowercase().replaceFirstChar { c -> c.titlecase(Locale.getDefault()) }
+                }
+        }
+
         fun formatCurrentPlaceAndDate(city: String, isFrench: Boolean): String {
-            val cleanCity = city.substringBefore(",").trim().ifBlank { if (isFrench) "Algérie" else "Location" }
+            val cleanCity = extractCityName(city, isFrench)
             return if (isFrench) {
                 val sdf = SimpleDateFormat("d MMMM yyyy", Locale.FRENCH)
                 "$cleanCity, le ${sdf.format(Date())}"

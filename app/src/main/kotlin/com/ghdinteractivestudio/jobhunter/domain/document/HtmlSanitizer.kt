@@ -65,18 +65,45 @@ object HtmlSanitizer {
             .trim()
     }
 
+    private val BLOCKED_EMAIL_TOKENS = listOf(
+        "example.com", "noreply", "no-reply", "donotreply", "do-not-reply",
+        "sentry", "accommodation", "accessibility", "reasonable-",
+        "privacy", "gdpr", "rgpd", "dpo@", "legal@", "compliance@",
+        "abuse@", "security@", "postmaster@", "mailer-daemon", "webmaster@",
+        "unsubscribe", "bounce", "notification@", "newsletter", "support@",
+        "marketing@", "press@", "media@", "remotive.", "jobicy.", "himalayas.",
+        "weworkremotely.", "arbeitnow.", "emploitic.", "tanqeeb.", "qatarliving.",
+        "greenhouse.io", "ashbyhq.com", "lever.co", "workday.com"
+    )
+
+    private val HIRING_EMAIL_TOKENS = listOf(
+        "recruit", "hiring", "talent", "career", "jobs", "hr", "rh",
+        "candidat", "cv", "apply", "people", "staffing"
+    )
+
+    fun isValidRecruiterEmail(email: String): Boolean {
+        val clean = email.trim().lowercase()
+        if (clean.length < 6 || !clean.contains("@")) return false
+        if (clean.endsWith(".png") || clean.endsWith(".jpg") || clean.endsWith(".jpeg") ||
+            clean.endsWith(".gif") || clean.endsWith(".svg") || clean.endsWith(".webp") ||
+            clean.endsWith(".css") || clean.endsWith(".js")
+        ) return false
+        return BLOCKED_EMAIL_TOKENS.none { clean.contains(it) }
+    }
+
     fun extractRecruiterEmail(text: String): String {
         val emailRegex = Regex("""[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}""")
         return emailRegex.findAll(text)
-            .map { it.value }
-            .firstOrNull { email ->
+            .map { it.value.trim() }
+            .filter { isValidRecruiterEmail(it) }
+            .distinctBy { it.lowercase() }
+            .maxByOrNull { email ->
                 val lower = email.lowercase()
-                !lower.contains("example.com") &&
-                    !lower.contains("noreply") &&
-                    !lower.contains("no-reply") &&
-                    !lower.contains("sentry") &&
-                    !lower.endsWith(".png") &&
-                    !lower.endsWith(".jpg")
+                when {
+                    HIRING_EMAIL_TOKENS.any { lower.contains(it) } -> 100
+                    lower.startsWith("info@") || lower.startsWith("contact@") -> 20
+                    else -> 50
+                }
             } ?: ""
     }
 }
