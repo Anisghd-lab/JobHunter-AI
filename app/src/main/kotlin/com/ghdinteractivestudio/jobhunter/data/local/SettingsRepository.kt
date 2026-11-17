@@ -75,6 +75,7 @@ data class AppSettings(
     val agentActive247: Boolean = true,
     val autoApplyEnabled: Boolean = false,
     val autoApplyMinScore: Int = 70,
+    val adaptCvPerOffer: Boolean = false,
     val isDarkTheme: Boolean = true,
     val lastScanTimestamp: Long = 0L
 ) {
@@ -127,6 +128,7 @@ class SettingsRepository private constructor(context: Context) {
             agentActive247 = prefs.getBoolean("agent_247", true),
             autoApplyEnabled = prefs.getBoolean("auto_apply", false),
             autoApplyMinScore = prefs.getInt("auto_apply_min_score", 70),
+            adaptCvPerOffer = prefs.getBoolean("adapt_cv_per_offer", false),
             isDarkTheme = prefs.getBoolean("dark_theme", true),
             lastScanTimestamp = prefs.getLong("last_scan_ts", 0L)
         )
@@ -150,6 +152,7 @@ class SettingsRepository private constructor(context: Context) {
             putBoolean("agent_247", next.agentActive247)
             putBoolean("auto_apply", next.autoApplyEnabled)
             putInt("auto_apply_min_score", next.autoApplyMinScore)
+            putBoolean("adapt_cv_per_offer", next.adaptCvPerOffer)
             putBoolean("dark_theme", next.isDarkTheme)
             putLong("last_scan_ts", next.lastScanTimestamp)
         }.apply()

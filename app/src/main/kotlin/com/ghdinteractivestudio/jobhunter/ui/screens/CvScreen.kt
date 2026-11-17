@@ -25,16 +25,21 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContactMail
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Work
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -59,6 +64,7 @@ import com.ghdinteractivestudio.jobhunter.ui.theme.bold
 import com.ghdinteractivestudio.jobhunter.ui.theme.monospaced
 import com.ghdinteractivestudio.jobhunter.ui.theme.semibold
 import kotlinx.coroutines.flow.StateFlow
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,11 +76,13 @@ fun CvScreen(
     isAnalyzingCv: Boolean,
     onImportCv: (Uri) -> Unit,
     onReanalyzeWithAi: () -> Unit,
+    onSaveProfile: (UserProfile) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val profile by profileFlow.collectAsState()
     val dark = LocalDark.current
     var selectedViewMode by remember { mutableStateOf("analyse") } // "analyse" or "raw_text"
+    var showEditDialog by remember { mutableStateOf(false) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -272,7 +280,39 @@ fun CvScreen(
                         }
                     }
 
-                    Spacer(Modifier.height(14.dp))
+                    val hasOriginalFile = profile.sourceCvPath.isNotBlank() && File(profile.sourceCvPath).exists()
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = when {
+                                profile.isModifiedCv -> "✏️ Modifié manuellement (la version modifiée sera jointe)"
+                                hasOriginalFile -> "✓ Fichier original intact sauvegardé pour l'envoi"
+                                else -> "⚠️ Ré-importez votre CV pour joindre le fichier original intact"
+                            },
+                            style = Type.label,
+                            color = when {
+                                profile.isModifiedCv -> Palette.electricBlue
+                                hasOriginalFile -> Palette.emeraldAccent
+                                else -> Palette.attention
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (profile.isModifiedCv && hasOriginalFile) {
+                            TextButton(
+                                onClick = { onSaveProfile(profile.copy(isModifiedCv = false)) }
+                            ) {
+                                Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Original", style = Type.label.bold)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
 
                     // Mode Switcher Tabs
                     Row(
@@ -352,11 +392,23 @@ fun CvScreen(
                         .padding(16.dp)
                 ) {
                     Column {
-                        Text(
-                            text = profile.fullName.ifBlank { "Candidat" },
-                            style = Type.titleLarge.bold,
-                            color = Palette.text
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = profile.fullName.ifBlank { "Candidat" },
+                                style = Type.titleLarge.bold,
+                                color = Palette.text,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { showEditDialog = true }) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Modifier", style = Type.label.bold)
+                            }
+                        }
                         if (profile.title.isNotBlank()) {
                             Text(
                                 text = profile.title,
@@ -637,5 +689,83 @@ fun CvScreen(
         }
 
         Spacer(Modifier.height(90.dp))
+    }
+
+    if (showEditDialog) {
+        var editedTitle by remember(profile) { mutableStateOf(profile.title) }
+        var editedSummary by remember(profile) { mutableStateOf(profile.summary) }
+        var editedSkills by remember(profile) { mutableStateOf(profile.skills.joinToString(", ")) }
+
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            containerColor = if (dark) Color(0xFF131823) else Color.White,
+            title = {
+                Text(
+                    text = "Modifier mon CV",
+                    style = Type.titleMedium.bold,
+                    color = Palette.text
+                )
+            },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        text = "Si vous enregistrez une modification ici, l'application joindra cette version modifiée au lieu du fichier PDF/DOCX d'origine.",
+                        style = Type.label,
+                        color = Palette.secondary
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = editedTitle,
+                        onValueChange = { editedTitle = it },
+                        label = { Text("Titre professionnel") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = editedSummary,
+                        onValueChange = { editedSummary = it },
+                        label = { Text("Résumé / Accroche") },
+                        minLines = 3,
+                        maxLines = 5,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = editedSkills,
+                        onValueChange = { editedSkills = it },
+                        label = { Text("Compétences (séparées par virgule)") },
+                        minLines = 2,
+                        maxLines = 4,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val updatedSkills = editedSkills.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                        onSaveProfile(
+                            profile.copy(
+                                title = editedTitle.trim(),
+                                summary = editedSummary.trim(),
+                                skills = updatedSkills,
+                                isModifiedCv = true,
+                                parsedAt = System.currentTimeMillis()
+                            )
+                        )
+                        showEditDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent, contentColor = Color.White)
+                ) {
+                    Text("Enregistrer (CV Modifié)", style = Type.label.bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) {
+                    Text("Annuler", color = Palette.secondary)
+                }
+            }
+        )
     }
 }

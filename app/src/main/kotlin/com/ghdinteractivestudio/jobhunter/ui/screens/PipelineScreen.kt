@@ -387,7 +387,11 @@ fun ApplicationTrackingCard(
                                 ) {
                                     Icon(Icons.Default.Description, contentDescription = null, tint = Palette.electricBlue, modifier = Modifier.size(13.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text("CV ${File(app.tailoredCvPath).extension.uppercase()}", style = Type.label.bold, color = Palette.electricBlue)
+                                    Text(
+                                        text = if (app.tailoredCvPath.contains("_Original_")) "CV Original" else "CV Modifié (${File(app.tailoredCvPath).extension.uppercase()})",
+                                        style = Type.label.bold,
+                                        color = Palette.electricBlue
+                                    )
                                 }
                             }
                             if (app.letterPath.isNotBlank() && File(app.letterPath).exists()) {

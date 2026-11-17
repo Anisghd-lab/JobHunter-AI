@@ -96,6 +96,7 @@ fun RadarScreen(
     onAnalyzeOfferClick: (JobOffer) -> Unit,
     onApplyClick: (JobOffer) -> Unit,
     onRegenerateOfferClick: (JobOffer) -> Unit = {},
+    onToggleCvMode: (JobOffer, Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val rawOffers by offersFlow.collectAsState()
@@ -319,6 +320,7 @@ fun RadarScreen(
             outcome = activeOutcome,
             isRegenerating = busyOfferId == activeOutcome.updatedOffer.id,
             onRegenerate = { onRegenerateOfferClick(activeOutcome.updatedOffer) },
+            onSwitchCvMode = { useTailored -> onToggleCvMode(activeOutcome.updatedOffer, useTailored) },
             onDismiss = onDismissOutcome,
             onMarkApplied = { onMarkAsApplied(activeOutcome.updatedOffer) }
         )
@@ -648,6 +650,7 @@ fun ApplyAssistantDialog(
     outcome: ApplicationOutcome,
     isRegenerating: Boolean = false,
     onRegenerate: () -> Unit = {},
+    onSwitchCvMode: (Boolean) -> Unit = {},
     onDismiss: () -> Unit,
     onMarkApplied: () -> Unit
 ) {
@@ -682,6 +685,7 @@ fun ApplyAssistantDialog(
                 Spacer(Modifier.height(10.dp))
 
                 // Files generated
+                val usingOriginal = outcome.usesOriginalCv || offer.tailoredCvPath.contains("_Original_")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (offer.tailoredCvPath.isNotBlank()) {
                         Button(
@@ -695,7 +699,10 @@ fun ApplyAssistantDialog(
                         ) {
                             Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("CV ${File(offer.tailoredCvPath).extension.uppercase()}", style = Type.label.bold)
+                            Text(
+                                text = if (usingOriginal) "CV Original" else "CV Modifié (${File(offer.tailoredCvPath).extension.uppercase()})",
+                                style = Type.label.bold
+                            )
                         }
                     }
                     if (offer.letterPath.isNotBlank()) {
@@ -712,6 +719,21 @@ fun ApplyAssistantDialog(
                             Spacer(Modifier.width(4.dp))
                             Text("Lettre ${File(offer.letterPath).extension.uppercase()}", style = Type.label.bold)
                         }
+                    }
+                }
+
+                if (!outcome.sentSilentlyByEmail) {
+                    TextButton(
+                        onClick = { onSwitchCvMode(usingOriginal) },
+                        enabled = !isRegenerating
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (usingOriginal) "Adapter le CV (joindre version modifiée)" else "Joindre le CV Original (si sauvegardé)",
+                            style = Type.label.bold,
+                            color = Palette.electricBlue
+                        )
                     }
                 }
 

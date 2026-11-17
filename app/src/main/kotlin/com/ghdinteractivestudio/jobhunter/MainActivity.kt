@@ -167,6 +167,16 @@ class MainActivity : ComponentActivity() {
                                 coroutineScope.launch {
                                     handleApplyToJob(offer, settingsRepo, sendSilentEmail = false)
                                 }
+                            },
+                            onToggleCvMode = { offer, useTailored ->
+                                coroutineScope.launch {
+                                    handleApplyToJob(
+                                        offer = offer,
+                                        settingsRepo = settingsRepo,
+                                        sendSilentEmail = false,
+                                        forceTailoredCv = useTailored
+                                    )
+                                }
                             }
                         )
 
@@ -189,7 +199,8 @@ class MainActivity : ComponentActivity() {
                                                 "Email et pièces jointes prêts pour ${offer.recruiterEmail}"
                                             } else {
                                                 "CV et Lettre prêts à déposer sur ${offer.sourcePlatform}"
-                                            }
+                                            },
+                                            usesOriginalCv = offer.tailoredCvPath.contains("_Original_")
                                         )
                                         currentTab = "radar"
                                     } else {
@@ -215,6 +226,21 @@ class MainActivity : ComponentActivity() {
                             onReanalyzeWithAi = {
                                 coroutineScope.launch {
                                     handleReanalyzeCvWithAi(settingsRepo)
+                                }
+                            },
+                            onSaveProfile = { editedProfile ->
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    AppDatabase.getInstance(this@MainActivity)
+                                        .userProfileDao()
+                                        .saveProfile(UserProfileEntity.fromDomain(editedProfile))
+                                    userProfileState.value = editedProfile
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            if (editedProfile.isModifiedCv) "CV modifié enregistré !" else "CV original rétabli ✓",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
                                 }
                             }
                         )
@@ -361,6 +387,7 @@ class MainActivity : ComponentActivity() {
                 sourceCvFormat = extractedData.format,
                 sourceCvPath = backupFile,
                 rawCvContent = extractedData.rawText,
+                isModifiedCv = false,
                 parsedAt = System.currentTimeMillis()
             )
 
@@ -404,6 +431,7 @@ class MainActivity : ComponentActivity() {
                 sourceCvFormat = current.sourceCvFormat,
                 sourceCvPath = current.sourceCvPath,
                 rawCvContent = current.rawCvContent,
+                isModifiedCv = current.isModifiedCv,
                 parsedAt = System.currentTimeMillis()
             )
             AppDatabase.getInstance(this@MainActivity).userProfileDao()
@@ -447,7 +475,8 @@ class MainActivity : ComponentActivity() {
     private suspend fun handleApplyToJob(
         offer: JobOffer,
         settingsRepo: SettingsRepository,
-        sendSilentEmail: Boolean = true
+        sendSilentEmail: Boolean = true,
+        forceTailoredCv: Boolean? = null
     ) = withContext(Dispatchers.IO) {
         busyOfferIdState.value = offer.id
         val res = ApplicationAutomationManager.prepareAndApply(
@@ -456,7 +485,8 @@ class MainActivity : ComponentActivity() {
             profile = userProfileState.value,
             settings = settingsRepo.settings.value,
             scanner = scanner,
-            sendSilentEmailIfConfigured = sendSilentEmail
+            sendSilentEmailIfConfigured = sendSilentEmail,
+            forceTailoredCv = forceTailoredCv
         )
         withContext(Dispatchers.Main) {
             res.onSuccess { outcome ->

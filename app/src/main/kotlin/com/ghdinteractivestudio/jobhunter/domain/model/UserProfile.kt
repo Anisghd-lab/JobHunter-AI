@@ -45,5 +45,6 @@ data class UserProfile(
     val sourceCvFormat: String = "",
     val sourceCvPath: String = "",
     val rawCvContent: String = "",
+    val isModifiedCv: Boolean = false,
     val parsedAt: Long = 0L
 )

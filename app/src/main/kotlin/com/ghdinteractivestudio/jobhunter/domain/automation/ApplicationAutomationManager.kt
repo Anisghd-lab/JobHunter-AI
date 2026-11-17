@@ -29,7 +29,8 @@ data class ApplicationOutcome(
     val sentSilentlyByEmail: Boolean,
     val requiresWebAction: Boolean,
     val requiresEmailAppIntent: Boolean,
-    val message: String
+    val message: String,
+    val usesOriginalCv: Boolean = false
 )
 
 object ApplicationAutomationManager {
@@ -134,8 +135,9 @@ object ApplicationAutomationManager {
     }
 
     /**
-     * Step 2: Verifies deadline, builds MLDP Cover Letter & tailored CV in employer's required format
-     * (PDF or Word .docx), then dispatches via Email OR prepares for Website portal submission.
+     * Step 2: Verifies deadline, builds MLDP Cover Letter & selects CV attachment:
+     * attaches the ORIGINAL uploaded CV file by default unless modified by the user/AI
+     * or an incompatible format (e.g. DOCX required vs PDF original) demands regeneration.
      */
     suspend fun prepareAndApply(
         context: Context,
@@ -143,7 +145,8 @@ object ApplicationAutomationManager {
         profile: UserProfile,
         settings: AppSettings,
         scanner: JobScanner,
-        sendSilentEmailIfConfigured: Boolean = true
+        sendSilentEmailIfConfigured: Boolean = true,
+        forceTailoredCv: Boolean? = null
     ): Result<ApplicationOutcome> = withContext(Dispatchers.IO) {
         if (profile.rawCvContent.isBlank()) {
             return@withContext Result.failure(
@@ -157,10 +160,7 @@ object ApplicationAutomationManager {
         val targetEmail = liveOffer.recruiterEmail
         val engine = CvTailoringEngine(settings)
 
-        // Run AI CV tailoring (strictly 100% faithful to real CV)
-        val tailored = engine.tailorCvContent(liveOffer, profile).getOrNull()
-
-        // Generate personalized Cover Letter strictly following MLDP 7-part standard
+        // Generate personalized Cover Letter strictly following MLDP 7-part standard & job targeting
         val mldpLetter = engine.generateMldpCoverLetter(liveOffer, profile)
         val coverLetter = mldpLetter.toPlainText()
 
@@ -172,79 +172,38 @@ object ApplicationAutomationManager {
 
         val outputDir = File(context.filesDir, "applications").apply { mkdirs() }
 
-        // Build real CV sections
-        val cvSections = buildList {
-            val contactLine = listOfNotNull(
-                profile.email.ifBlank { null },
-                profile.phone.ifBlank { null },
-                profile.address.ifBlank { null }
-            ).joinToString(" | ")
-            if (contactLine.isNotBlank()) {
-                add("Coordonnées" to listOf(contactLine))
-            }
-
-            val summaryText = tailored?.executiveSummary?.takeIf { it.isNotBlank() } ?: profile.summary
-            if (summaryText.isNotBlank()) {
-                add("Profil Professionnel" to listOf(summaryText))
-            }
-
-            val skillsList = tailored?.prioritizedSkills?.takeIf { it.isNotEmpty() }
-                ?: (profile.skills + profile.softSkills).distinct()
-            if (skillsList.isNotEmpty()) {
-                add("Compétences Clés" to listOf(skillsList.joinToString(" • ")))
-            }
-
-            if (profile.experiences.isNotEmpty()) {
-                add(
-                    "Expériences Professionnelles" to profile.experiences.map { exp ->
-                        val header = listOfNotNull(
-                            exp.title.ifBlank { null },
-                            exp.company.ifBlank { null },
-                            exp.period.ifBlank { null }
-                        ).joinToString(" | ")
-                        if (exp.description.isNotBlank()) "$header\n${exp.description}" else header
-                    }
-                )
-            }
-
-            if (profile.educations.isNotEmpty()) {
-                add(
-                    "Formations & Diplômes" to profile.educations.map { edu ->
-                        listOfNotNull(
-                            edu.degree.ifBlank { null },
-                            edu.institution.ifBlank { null },
-                            edu.year.ifBlank { null }
-                        ).joinToString(" - ")
-                    }
-                )
-            }
-
-            if (profile.certifications.isNotEmpty()) {
-                add(
-                    "Certifications" to profile.certifications.map {
-                        listOfNotNull(it.name, it.issuer.ifBlank { null }, it.year.ifBlank { null }).joinToString(" - ")
-                    }
-                )
-            }
-
-            if (profile.languages.isNotEmpty()) {
-                add("Langues" to listOf(profile.languages.joinToString(" | ")))
-            }
-        }
-
-        val cvHeaderTitle = "${profile.fullName.ifBlank { "CV" }} — ${tailored?.targetTitle?.ifBlank { profile.title } ?: profile.title}"
-
-        // Respect Employer Demanded Format: Word (.docx) OR PDF
+        // Check whether to attach the Original uploaded CV vs generating a Modified/Tailored CV
         val useDocx = liveOffer.requiredFormat == DocumentFormatRequirement.DOCX
+        val originalFile = profile.sourceCvPath.takeIf { it.isNotBlank() }
+            ?.let { File(it) }
+            ?.takeIf { it.exists() && it.length() > 0L }
+        val originalExt = originalFile?.extension?.lowercase().orEmpty()
+        val originalFormatMatches = originalFile != null && (
+            liveOffer.requiredFormat == DocumentFormatRequirement.ANY ||
+                (liveOffer.requiredFormat == DocumentFormatRequirement.PDF && originalExt == "pdf") ||
+                (liveOffer.requiredFormat == DocumentFormatRequirement.DOCX && (originalExt == "docx" || originalExt == "doc"))
+            )
+        val modificationRequested = forceTailoredCv ?: (profile.isModifiedCv || settings.adaptCvPerOffer)
+        val attachOriginalCv = originalFormatMatches && !modificationRequested
 
-        val cvFile = if (useDocx) {
-            val f = File(outputDir, "CV_${safeName}_${uniqueSuffix}.docx")
-            DocxGenerator.generateDocx(cvHeaderTitle, cvSections, f)
-            f
+        val cvFile: File = if (attachOriginalCv && originalFile != null) {
+            File(outputDir, "CV_${safeName}_Original_${uniqueSuffix}.${originalExt}").also { dest ->
+                originalFile.copyTo(dest, overwrite = true)
+            }
         } else {
-            val f = File(outputDir, "CV_${safeName}_${uniqueSuffix}.pdf")
-            PdfGenerator.generatePdf(cvHeaderTitle, cvSections, f)
-            f
+            val tailored = engine.tailorCvContent(liveOffer, profile).getOrNull()
+            val cvSections = buildCvSections(profile, tailored)
+            val cvHeaderTitle = "${profile.fullName.ifBlank { "CV" }} — ${tailored?.targetTitle?.ifBlank { profile.title } ?: profile.title}"
+
+            if (useDocx) {
+                File(outputDir, "CV_${safeName}_${uniqueSuffix}.docx").also { f ->
+                    DocxGenerator.generateDocx(cvHeaderTitle, cvSections, f)
+                }
+            } else {
+                File(outputDir, "CV_${safeName}_${uniqueSuffix}.pdf").also { f ->
+                    PdfGenerator.generatePdf(cvHeaderTitle, cvSections, f)
+                }
+            }
         }
 
         // Generate MLDP-compliant Cover Letter file (DOCX vs PDF)
@@ -256,6 +215,12 @@ object ApplicationAutomationManager {
             val f = File(outputDir, "Lettre_${safeCompany}_${uniqueSuffix}.pdf")
             PdfGenerator.generateMldpCoverLetterPdf(mldpLetter, f)
             f
+        }
+
+        val cvKindLabel = when {
+            attachOriginalCv -> "CV original (${originalExt.uppercase()})"
+            originalFile == null -> "CV généré (ré-importez votre fichier dans Mon CV pour joindre l'original)"
+            else -> "CV modifié (${cvFile.extension.uppercase()})"
         }
 
         val attachments = listOf(cvFile, letterFile)
@@ -296,21 +261,21 @@ object ApplicationAutomationManager {
                     sentSilently = true
                     finalStatus = JobStatus.APPLIED
                     channelLabel = "Email envoyé à $targetEmail"
-                    resultMessage = "Candidature MLDP envoyée par email à $targetEmail (${if (useDocx) "DOCX" else "PDF"}) !"
+                    resultMessage = "Candidature envoyée à $targetEmail ($cvKindLabel + Lettre MLDP) !"
                 } else {
                     needsEmailIntent = true
                     channelLabel = "Email prêt ($targetEmail) — Échec SMTP: ${emailRes.exceptionOrNull()?.message?.take(40)}"
-                    resultMessage = "Dossier prêt (${if (useDocx) "DOCX" else "PDF"}). Envoi SMTP impossible : ouvrez votre appli Email."
+                    resultMessage = "Dossier prêt ($cvKindLabel + Lettre MLDP). Ouvrez votre appli Email."
                 }
             } else {
                 needsEmailIntent = true
                 channelLabel = "Email prêt ($targetEmail)"
-                resultMessage = "CV & Lettre MLDP générés (${if (useDocx) "DOCX" else "PDF"}) pour $targetEmail !"
+                resultMessage = "$cvKindLabel & Lettre MLDP prêts pour $targetEmail !"
             }
         } else {
             needsWebAction = true
             channelLabel = "Portail Web (${liveOffer.sourcePlatform})"
-            resultMessage = "CV & Lettre MLDP prêts (${if (useDocx) "DOCX" else "PDF"}). Finalisez sur le site de l'offre !"
+            resultMessage = "$cvKindLabel & Lettre MLDP prêts. Finalisez sur le site de l'offre !"
         }
 
         val updated = liveOffer.copy(
@@ -334,9 +299,72 @@ object ApplicationAutomationManager {
                 sentSilentlyByEmail = sentSilently,
                 requiresWebAction = needsWebAction,
                 requiresEmailAppIntent = needsEmailIntent,
-                message = resultMessage
+                message = resultMessage,
+                usesOriginalCv = attachOriginalCv
             )
         )
+    }
+
+    private fun buildCvSections(
+        profile: UserProfile,
+        tailored: com.ghdinteractivestudio.jobhunter.domain.ai.TailoredCvResponse?
+    ): List<Pair<String, List<String>>> = buildList {
+        val contactLine = listOfNotNull(
+            profile.email.ifBlank { null },
+            profile.phone.ifBlank { null },
+            profile.address.ifBlank { null }
+        ).joinToString(" | ")
+        if (contactLine.isNotBlank()) {
+            add("Coordonnées" to listOf(contactLine))
+        }
+
+        val summaryText = tailored?.executiveSummary?.takeIf { it.isNotBlank() } ?: profile.summary
+        if (summaryText.isNotBlank()) {
+            add("Profil Professionnel" to listOf(summaryText))
+        }
+
+        val skillsList = tailored?.prioritizedSkills?.takeIf { it.isNotEmpty() }
+            ?: (profile.skills + profile.softSkills).distinct()
+        if (skillsList.isNotEmpty()) {
+            add("Compétences Clés" to listOf(skillsList.joinToString(" • ")))
+        }
+
+        if (profile.experiences.isNotEmpty()) {
+            add(
+                "Expériences Professionnelles" to profile.experiences.map { exp ->
+                    val header = listOfNotNull(
+                        exp.title.ifBlank { null },
+                        exp.company.ifBlank { null },
+                        exp.period.ifBlank { null }
+                    ).joinToString(" | ")
+                    if (exp.description.isNotBlank()) "$header\n${exp.description}" else header
+                }
+            )
+        }
+
+        if (profile.educations.isNotEmpty()) {
+            add(
+                "Formations & Diplômes" to profile.educations.map { edu ->
+                    listOfNotNull(
+                        edu.degree.ifBlank { null },
+                        edu.institution.ifBlank { null },
+                        edu.year.ifBlank { null }
+                    ).joinToString(" - ")
+                }
+            )
+        }
+
+        if (profile.certifications.isNotEmpty()) {
+            add(
+                "Certifications" to profile.certifications.map {
+                    listOfNotNull(it.name, it.issuer.ifBlank { null }, it.year.ifBlank { null }).joinToString(" - ")
+                }
+            )
+        }
+
+        if (profile.languages.isNotEmpty()) {
+            add("Langues" to listOf(profile.languages.joinToString(" | ")))
+        }
     }
 
     /**

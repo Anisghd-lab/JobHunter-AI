@@ -199,6 +199,39 @@ fun AgentScreen(
                     }
                 }
 
+                Spacer(Modifier.height(10.dp))
+
+                // Original vs Modified CV Policy Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Adapter le CV automatiquement par offre",
+                            style = Type.bodySmall.bold,
+                            color = Palette.text
+                        )
+                        Text(
+                            text = "Désactivé (recommandé) = joint le fichier CV original intact, sauf si vous modifiez votre CV ou si un format différent est exigé.",
+                            style = Type.label,
+                            color = Palette.secondary
+                        )
+                    }
+
+                    Switch(
+                        checked = settings.adaptCvPerOffer,
+                        onCheckedChange = { adapt ->
+                            settingsRepo.update { it.copy(adaptCvPerOffer = adapt) }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Palette.emeraldAccent
+                        )
+                    )
+                }
+
                 Spacer(Modifier.height(12.dp))
 
                 Button(

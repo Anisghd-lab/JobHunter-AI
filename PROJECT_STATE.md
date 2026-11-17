@@ -38,6 +38,9 @@ Application Android native (Kotlin + Jetpack Compose Liquid Glass) servant d'age
   - Mise en page exécutive 7 parties : (1) Coordonnées expéditeur haut-gauche, (2) **Ville & date tout en haut à droite**, (3) Destinataire milieu-droite, (4) `Objet :` gras à gauche + formule d'appel, (5) 4 paragraphes avec alinéa strictement ciblés sur le poste, (6) Formule de politesse, (7) Signature bas-droite.
   - Filtrage intelligent `selectTargetedProfile(...)` : sélectionne uniquement les compétences, expériences et certifications pertinentes pour l'offre (jamais tout le CV en vrac) + bouton de régénération rapide dans la boîte d'aperçu.
   - Rendu PDF vectoriel (`generateMldpCoverLetterPdf`) et Word `.docx` OpenXML à tableau sans bordure (`generateMldpCoverLetterDocx`).
+- [x] **Priorité au CV Original (`ApplicationAutomationManager`, `CvScreen`, `AgentScreen`)** :
+  - Par défaut (`adaptCvPerOffer = false`), l'envoi joint le fichier CV original intact (`sourceCvPath`), sans modification inutile ni surcoût IA.
+  - Bascule automatique vers le CV généré/modifié uniquement si l'utilisateur édite son profil dans **Mon CV** (`isModifiedCv = true`), active **Adapter le CV par offre**, bascule manuellement dans l'aperçu d'une offre (`Adapter le CV` / `CV Original`), ou si l'employeur exige un format différent (`.docx` vs `.pdf`).
 - [x] **Agent Autonome 24/7, Radar Multi-Sources & Envoi Email** :
   - `JobHunterForegroundService` (`DATA_SYNC`), réveil `AlarmManager` sécurisé Android 14+, SMTP STARTTLS/SSL + Gmail OAuth2.
 
