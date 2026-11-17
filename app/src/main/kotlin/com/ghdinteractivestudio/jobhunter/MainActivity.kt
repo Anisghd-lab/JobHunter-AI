@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +48,7 @@ import com.ghdinteractivestudio.jobhunter.ui.screens.AgentScreen
 import com.ghdinteractivestudio.jobhunter.ui.screens.CvScreen
 import com.ghdinteractivestudio.jobhunter.ui.screens.PipelineScreen
 import com.ghdinteractivestudio.jobhunter.ui.screens.RadarScreen
+import com.ghdinteractivestudio.jobhunter.ui.screens.WebPortalAssistantDialog
 import com.ghdinteractivestudio.jobhunter.ui.theme.JobHunterTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,6 +68,8 @@ class MainActivity : ComponentActivity() {
     private val activeOutcomeState = MutableStateFlow<ApplicationOutcome?>(null)
     private val isCheckingFollowUpState = MutableStateFlow(false)
     private val isRunningAutomationState = MutableStateFlow(false)
+    private val webAssistantOfferState = MutableStateFlow<JobOffer?>(null)
+    private val requestedTabState = MutableStateFlow<String?>(null)
 
     private val scanner = JobScanner()
 
@@ -131,10 +135,19 @@ class MainActivity : ComponentActivity() {
             val activeOutcome by activeOutcomeState.collectAsState()
             val isCheckingFollowUp by isCheckingFollowUpState.collectAsState()
             val isRunningAutomation by isRunningAutomationState.collectAsState()
+            val webAssistantOffer by webAssistantOfferState.collectAsState()
+            val requestedTab by requestedTabState.collectAsState()
             val allOffersSnapshot by allOffersState.collectAsState()
             val todayAutoCount = remember(allOffersSnapshot) {
                 val todayStart = ApplicationAutomationManager.startOfTodayMillis()
                 allOffersSnapshot.count { it.autoApplied && it.appliedAt >= todayStart }
+            }
+
+            LaunchedEffect(requestedTab) {
+                requestedTab?.let { tab ->
+                    currentTab = tab
+                    requestedTabState.value = null
+                }
             }
 
             JobHunterTheme(darkTheme = settings.isDarkTheme) {
@@ -190,6 +203,9 @@ class MainActivity : ComponentActivity() {
                                         forceTailoredCv = useTailored
                                     )
                                 }
+                            },
+                            onOpenWebPortal = { offer ->
+                                webAssistantOfferState.value = offer
                             }
                         )
 
@@ -250,19 +266,19 @@ class MainActivity : ComponentActivity() {
                             onPrepareOrDispatchClick = { offer ->
                                 coroutineScope.launch {
                                     if (offer.tailoredCvPath.isNotBlank() && offer.generatedLetter.isNotBlank()) {
-                                        activeOutcomeState.value = ApplicationOutcome(
-                                            updatedOffer = offer,
-                                            sentSilentlyByEmail = false,
-                                            requiresWebAction = offer.recruiterEmail.isBlank(),
-                                            requiresEmailAppIntent = offer.recruiterEmail.isNotBlank(),
-                                            message = if (offer.recruiterEmail.isNotBlank()) {
-                                                "Email et pièces jointes prêts pour ${offer.recruiterEmail}"
-                                            } else {
-                                                "CV et Lettre prêts à déposer sur ${offer.sourcePlatform}"
-                                            },
-                                            usesOriginalCv = offer.tailoredCvPath.contains("_Original_")
-                                        )
-                                        currentTab = "radar"
+                                        if (offer.recruiterEmail.isBlank() && offer.url.startsWith("http")) {
+                                            webAssistantOfferState.value = offer
+                                        } else {
+                                            activeOutcomeState.value = ApplicationOutcome(
+                                                updatedOffer = offer,
+                                                sentSilentlyByEmail = false,
+                                                requiresWebAction = offer.recruiterEmail.isBlank(),
+                                                requiresEmailAppIntent = offer.recruiterEmail.isNotBlank(),
+                                                message = "Email et pièces jointes prêts pour ${offer.recruiterEmail}",
+                                                usesOriginalCv = offer.tailoredCvPath.contains("_Original_")
+                                            )
+                                            currentTab = "radar"
+                                        }
                                     } else {
                                         handleApplyToJob(offer, settingsRepo)
                                     }
@@ -345,6 +361,43 @@ class MainActivity : ComponentActivity() {
                                         Toast.makeText(this@MainActivity, toastText, Toast.LENGTH_LONG).show()
                                     }
                                 }
+                            },
+                            onOpenPortalSetupClick = { portal ->
+                                webAssistantOfferState.value = JobOffer(
+                                    id = "portal_setup_${portal.id}",
+                                    title = "Connexion / Compte ${portal.name}",
+                                    company = portal.name,
+                                    location = portal.badge,
+                                    description = portal.description,
+                                    sourcePlatform = portal.name,
+                                    url = portal.signupUrl
+                                )
+                            }
+                        )
+                    }
+
+                    // Visible Interactive WebView Portal Assistant (account signup/CAPTCHA + form fill + IMAP OTP)
+                    webAssistantOffer?.let { assistantOffer ->
+                        WebPortalAssistantDialog(
+                            offer = assistantOffer,
+                            profile = userProfileState.value,
+                            settingsRepo = settingsRepo,
+                            onDismiss = { webAssistantOfferState.value = null },
+                            onMarkApplied = {
+                                coroutineScope.launch {
+                                    markOfferStatus(
+                                        assistantOffer.copy(
+                                            appliedAt = System.currentTimeMillis(),
+                                            appliedChannel = "Portail Web (Assisté)"
+                                        ),
+                                        JobStatus.APPLIED
+                                    )
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "Candidature Web enregistrée dans Suivi ✓",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
                             }
                         )
                     }
@@ -373,6 +426,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        val openTab = intent?.getStringExtra("open_tab")
+        if (!openTab.isNullOrBlank()) {
+            requestedTabState.value = openTab
+        }
         val settingsRepo = SettingsRepository.getInstance(this)
         val testPath = intent?.getStringExtra("import_path")
         if (!testPath.isNullOrBlank()) {

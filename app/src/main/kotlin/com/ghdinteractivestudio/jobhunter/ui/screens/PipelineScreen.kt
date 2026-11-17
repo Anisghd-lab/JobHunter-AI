@@ -93,14 +93,19 @@ fun PipelineScreen(
     val allOffers by allOffersFlow.collectAsState()
     var activeFilter by remember { mutableStateOf(PipelineFilter.ALL) }
 
-    // Strictly track REAL analyzed, ready, applied, interview or rejected candidatures (NEVER raw radar scan or archived noise)
-    val trackedApps = allOffers.filter { it.status != JobStatus.DETECTED && it.status != JobStatus.ARCHIVED }
+    // Strictly track REAL submitted or prepared candidatures (NEVER auto-rejected ANALYZED offers, raw DETECTED scans, or ARCHIVED noise)
+    val trackedApps = allOffers.filter {
+        it.status == JobStatus.APPLIED ||
+            it.status == JobStatus.INTERVIEW ||
+            it.status == JobStatus.REJECTED ||
+            it.status == JobStatus.READY_TO_SEND
+    }
 
     val totalApplied = trackedApps.count { it.status == JobStatus.APPLIED }
     val totalAuto = trackedApps.count { it.autoApplied }
     val totalInterview = trackedApps.count { it.status == JobStatus.INTERVIEW }
     val totalReplies = trackedApps.count { it.lastReplyFrom.isNotBlank() || it.lastReplySummary.isNotBlank() || it.status == JobStatus.REJECTED }
-    val totalPending = trackedApps.count { it.status == JobStatus.READY_TO_SEND || it.status == JobStatus.ANALYZED }
+    val totalPending = trackedApps.count { it.status == JobStatus.READY_TO_SEND }
 
     val filteredApps = remember(trackedApps, activeFilter) {
         when (activeFilter) {
@@ -108,7 +113,7 @@ fun PipelineScreen(
             PipelineFilter.AUTO -> trackedApps.filter { it.autoApplied }
             PipelineFilter.REPLIES -> trackedApps.filter { it.lastReplyFrom.isNotBlank() || it.lastReplySummary.isNotBlank() || it.status == JobStatus.REJECTED }
             PipelineFilter.INTERVIEWS -> trackedApps.filter { it.status == JobStatus.INTERVIEW }
-            PipelineFilter.WEB -> trackedApps.filter { it.status == JobStatus.READY_TO_SEND || it.status == JobStatus.ANALYZED }
+            PipelineFilter.WEB -> trackedApps.filter { it.status == JobStatus.READY_TO_SEND }
         }
     }
 

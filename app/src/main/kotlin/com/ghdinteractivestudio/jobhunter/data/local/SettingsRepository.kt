@@ -74,7 +74,7 @@ data class AppSettings(
     val gmailOAuthToken: String = "",
     val agentActive247: Boolean = true,
     val autoApplyEnabled: Boolean = false,
-    val autoApplyMinScore: Int = 70,
+    val autoApplyMinScore: Int = 50,
     val adaptCvPerOffer: Boolean = false,
     val aiAutonomousEmailControl: Boolean = true,
     val autoFollowUpEnabled: Boolean = true,
@@ -82,16 +82,26 @@ data class AppSettings(
     val preferInstalledYahooApp: Boolean = false,
     val connectedYahooPackage: String = "",
     val smtpAuthPaused: Boolean = false,
-    val autoApplyEmailOnly: Boolean = true,
-    val autoApplyMaxPerCycle: Int = 3,
-    val autoApplyMaxPerDay: Int = 10,
+    val autoApplyEmailOnly: Boolean = false,
+    val autoApplyMaxPerCycle: Int = 12,
+    val autoApplyMaxPerDay: Int = 50,
     val maxFollowUpsPerOffer: Int = 1,
     val lastAutoApplyRunAt: Long = 0L,
     val lastInboxCheckAt: Long = 0L,
     val lastAutomationSummary: String = "",
+    val humanizeWritingEnabled: Boolean = true,
+    val connectedPortalsCsv: String = "",
     val isDarkTheme: Boolean = true,
     val lastScanTimestamp: Long = 0L
 ) {
+    fun isPortalConnected(portalId: String): Boolean =
+        connectedPortalsCsv.split(",").map { it.trim() }.any { it == portalId }
+
+    fun withPortalStatus(portalId: String, connected: Boolean): AppSettings {
+        val current = connectedPortalsCsv.split(",").map { it.trim() }.filter { it.isNotBlank() }.toMutableSet()
+        if (connected) current.add(portalId) else current.remove(portalId)
+        return copy(connectedPortalsCsv = current.sorted().joinToString(","))
+    }
     fun apiKeyFor(provider: FreeLlmProvider): String = when (provider) {
         FreeLlmProvider.OPENROUTER_FREE -> openrouterApiKey
         FreeLlmProvider.XKIRO_FREE -> xkiroApiKey
@@ -127,6 +137,17 @@ class SettingsRepository private constructor(context: Context) {
         val prov = runCatching { FreeLlmProvider.valueOf(provStr) }
             .getOrDefault(FreeLlmProvider.OPENROUTER_FREE)
 
+        // One-time upgrade so users immediately benefit from 50% threshold, 50/day capacity & Web Portal Assistant
+        if (!prefs.getBoolean("auto_50_web_v3", false)) {
+            prefs.edit()
+                .putInt("auto_apply_min_score", 50)
+                .putInt("auto_apply_max_day", 50)
+                .putInt("auto_apply_max_cycle", 12)
+                .putBoolean("auto_apply_email_only", false)
+                .putBoolean("auto_50_web_v3", true)
+                .apply()
+        }
+
         return AppSettings(
             activeProvider = prov,
             activeModel = prefs.getString("active_model", "openrouter/free") ?: "openrouter/free",
@@ -142,7 +163,7 @@ class SettingsRepository private constructor(context: Context) {
             gmailOAuthToken = prefs.getString("gmail_oauth_token", "") ?: "",
             agentActive247 = prefs.getBoolean("agent_247", true),
             autoApplyEnabled = prefs.getBoolean("auto_apply", false),
-            autoApplyMinScore = prefs.getInt("auto_apply_min_score", 70),
+            autoApplyMinScore = prefs.getInt("auto_apply_min_score", 50),
             adaptCvPerOffer = prefs.getBoolean("adapt_cv_per_offer", false),
             aiAutonomousEmailControl = prefs.getBoolean("ai_auto_email", true),
             autoFollowUpEnabled = prefs.getBoolean("auto_follow_up", true),
@@ -150,13 +171,15 @@ class SettingsRepository private constructor(context: Context) {
             preferInstalledYahooApp = prefs.getBoolean("prefer_yahoo_app", false),
             connectedYahooPackage = prefs.getString("connected_yahoo_pkg", "") ?: "",
             smtpAuthPaused = prefs.getBoolean("smtp_auth_paused", false),
-            autoApplyEmailOnly = prefs.getBoolean("auto_apply_email_only", true),
-            autoApplyMaxPerCycle = prefs.getInt("auto_apply_max_cycle", 3),
-            autoApplyMaxPerDay = prefs.getInt("auto_apply_max_day", 10),
+            autoApplyEmailOnly = prefs.getBoolean("auto_apply_email_only", false),
+            autoApplyMaxPerCycle = prefs.getInt("auto_apply_max_cycle", 12),
+            autoApplyMaxPerDay = prefs.getInt("auto_apply_max_day", 50),
             maxFollowUpsPerOffer = prefs.getInt("max_followups_offer", 1),
             lastAutoApplyRunAt = prefs.getLong("last_auto_apply_ts", 0L),
             lastInboxCheckAt = prefs.getLong("last_inbox_check_ts", 0L),
             lastAutomationSummary = prefs.getString("last_auto_summary", "") ?: "",
+            humanizeWritingEnabled = prefs.getBoolean("humanize_writing", true),
+            connectedPortalsCsv = prefs.getString("connected_portals_csv", "") ?: "",
             isDarkTheme = prefs.getBoolean("dark_theme", true),
             lastScanTimestamp = prefs.getLong("last_scan_ts", 0L)
         )
@@ -194,6 +217,8 @@ class SettingsRepository private constructor(context: Context) {
             putLong("last_auto_apply_ts", next.lastAutoApplyRunAt)
             putLong("last_inbox_check_ts", next.lastInboxCheckAt)
             putString("last_auto_summary", next.lastAutomationSummary)
+            putBoolean("humanize_writing", next.humanizeWritingEnabled)
+            putString("connected_portals_csv", next.connectedPortalsCsv)
             putBoolean("dark_theme", next.isDarkTheme)
             putLong("last_scan_ts", next.lastScanTimestamp)
         }.apply()

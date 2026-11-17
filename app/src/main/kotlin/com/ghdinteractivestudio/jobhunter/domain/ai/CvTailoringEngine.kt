@@ -239,13 +239,20 @@ Réponds UNIQUEMENT en JSON strict :
             "${localizeCvTerm(it.degree, offerLangFrench)}${if (it.institution.isNotBlank()) " (${it.institution})" else ""}"
         } ?: ""
 
+        val humanizeRuleFr = if (settings.humanizeWritingEnabled) {
+            "\n6. STYLE HUMAIN AUTHENTIQUE (HUMANIZE) : écris comme une vraie personne expérimentée s'adressant directement à un recruteur. Varie la longueur des phrases (certaines courtes et directes, d'autres plus posées). INTERDICTION d'utiliser des tirets cadratins (—), du jargon IA ou des clichés (« C'est avec un vif intérêt », « environnement stimulant », « je suis convaincu(e) que », « rigueur et dynamisme », « atout indéniable »)."
+        } else ""
+        val humanizeRuleEn = if (settings.humanizeWritingEnabled) {
+            "\n6. NATURAL HUMAN TONE (HUMANIZE): write like a real experienced practitioner writing to a hiring peer. Mix concise direct sentences with measured detail. STRICTLY AVOID em-dashes (—) and recognizable AI clichés ('I am thrilled', 'stands out as', 'delve into', 'testament to', 'leverage my expertise', 'seamless collaboration', 'deeply resonates', 'aligns closely')."
+        } else ""
+
         val (systemInstruction, prompt) = if (offerLangFrench) {
-            val sys = "Tu rédiges des lettres de motivation exécutives ultra-ciblées selon la structure MLDP, STRICTEMENT en FRANÇAIS uniquement. Aucun mot ni phrase d'anglais n'est toléré dans la réponse."
+            val sys = "Tu rédiges des lettres de motivation exécutives ultra-ciblées au ton humain naturel selon la structure MLDP, STRICTEMENT en FRANÇAIS uniquement. Aucun mot ni phrase d'anglais n'est toléré dans la réponse."
             val prm = """
 Rédige les 4 paragraphes d'une lettre de motivation ciblée selon la méthodologie MLDP au format JSON strict.
 
 RÈGLES ABSOLUES :
-1. LANGUE UNIQUE : Rédige 100 % en FRANÇAIS PROFESSIONNEL soutenu. Traduis impérativement en français tout intitulé ou compétence du profil formulé en anglais. INTERDICTION STRICTE de laisser la moindre phrase ou expression en anglais.
+1. LANGUE UNIQUE : Rédige 100 % en FRANÇAIS PROFESSIONNEL naturel. Traduis impérativement en français tout intitulé ou compétence du profil formulé en anglais. INTERDICTION STRICTE de laisser la moindre phrase ou expression en anglais.
 2. NE RÉCITE JAMAIS TOUT LE CV : cite UNIQUEMENT les compétences, l'expérience et la formation ciblées ci-dessous qui répondent directement au poste "${offer.title}".
 3. Pas d'ouverture robotique « Je suis [Nom] » (le nom figure déjà en en-tête et en signature).
 4. Concision & impact (2 à 4 phrases fluides par paragraphe, ~40 à 60 mots, format 1 page A4) :
@@ -253,7 +260,7 @@ RÈGLES ABSOLUES :
    - "paragraphExpectationsAndCompany" : Intérêt concret pour ${offer.company} / les enjeux du poste et la valeur ajoutée apportée.
    - "paragraphSelfValorization" : Mise en valeur UNIQUEMENT des compétences visées par l'offre ($skillsPrompt) appuyée par l'expérience pertinente${if (certPrompt.isNotBlank()) " et la certification utile" else ""}.
    - "paragraphInterviewAndCvInvite" : Demande d'entretien concise et invitation naturelle à consulter le CV en français ci-joint.
-5. "closingFormula" : Formule de politesse classique en français.
+5. "closingFormula" : Formule de politesse classique en français.$humanizeRuleFr
 
 Éléments réels du candidat pré-filtrés pour cette offre :
 - Profil ciblé : ${localizeCvTerm(targeted.title, true)}
@@ -281,7 +288,7 @@ Réponds UNIQUEMENT par cet objet JSON pur (sans markdown) :
             """.trimIndent()
             sys to prm
         } else {
-            val sys = "You write concise executive MLDP cover letters STRICTLY in natural professional ENGLISH ONLY. Never write a single French sentence, header, or closing phrase."
+            val sys = "You write natural, human-sounding MLDP cover letters STRICTLY in everyday professional ENGLISH ONLY. Never write a single French sentence, header, or closing phrase."
             val prm = """
 Write the 4 body paragraphs of a tailored cover letter in strict JSON following the 7-part business letter structure.
 
@@ -294,7 +301,7 @@ STRICT NON-NEGOTIABLE RULES:
    - "paragraphExpectationsAndCompany": Genuine alignment with ${offer.company}, its goals, and the key responsibilities of the role.
    - "paragraphSelfValorization": Concrete evidence highlighting ONLY the targeted competencies ($skillsPrompt) backed by relevant experience${if (certPrompt.isNotBlank()) " and relevant certification" else ""}.
    - "paragraphInterviewAndCvInvite": Confident request for an interview and invitation to review the attached English CV.
-5. "closingFormula": Standard English business closing (e.g., "Thank you in advance for your time and consideration. I look forward to hearing from you. Yours sincerely,").
+5. "closingFormula": Standard English business closing (e.g., "Thank you in advance for your time and consideration. I look forward to hearing from you. Yours sincerely,").$humanizeRuleEn
 
 Pre-filtered real candidate context for THIS role only:
 - Targeted profile: ${localizeCvTerm(targeted.title, false)}
@@ -332,7 +339,14 @@ Reply ONLY with valid pure JSON (no markdown code fences):
         val deterministic = buildDeterministicMldpLetter(offer, migratedProfile, targeted, offerLangFrench)
 
         if (aiPayload == null || aiPayload.paragraphPresentAndRequest.isBlank()) {
-            return deterministic
+            return if (settings.humanizeWritingEnabled) {
+                deterministic.copy(
+                    bodyParagraphs = deterministic.bodyParagraphs.map { humanizeBusinessText(it, offerLangFrench) },
+                    closingFormula = humanizeBusinessText(deterministic.closingFormula, offerLangFrench)
+                )
+            } else {
+                deterministic
+            }
         }
 
         val isFr = offerLangFrench
@@ -342,14 +356,15 @@ Reply ONLY with valid pure JSON (no markdown code fences):
             aiPayload.paragraphSelfValorization,
             aiPayload.paragraphInterviewAndCvInvite
         )
-        // Strictly reject/replace any single paragraph that leaked into the wrong language
+        // Strictly reject/replace any single paragraph that leaked into the wrong language + humanize prose
         val validatedParagraphs = rawAiParagraphs.mapIndexed { idx, para ->
             val clean = para.trim()
-            if (clean.length >= 25 && isStrictlyTargetLanguage(clean, isFr)) {
+            val chosen = if (clean.length >= 25 && isStrictlyTargetLanguage(clean, isFr)) {
                 clean
             } else {
                 deterministic.bodyParagraphs.getOrElse(idx) { "" }
             }
+            if (settings.humanizeWritingEnabled) humanizeBusinessText(chosen, isFr) else chosen
         }.filter { it.isNotBlank() }
 
         val validSubject = aiPayload.subject.trim()
@@ -358,9 +373,10 @@ Reply ONLY with valid pure JSON (no markdown code fences):
         val validSalutation = aiPayload.salutation.trim()
             .takeIf { it.isNotBlank() && isStrictlyTargetLanguage(it, isFr) }
             ?: deterministic.salutation
-        val validClosing = aiPayload.closingFormula.trim()
+        val rawClosing = aiPayload.closingFormula.trim()
             .takeIf { it.isNotBlank() && isStrictlyTargetLanguage(it, isFr) }
             ?: deterministic.closingFormula
+        val validClosing = if (settings.humanizeWritingEnabled) humanizeBusinessText(rawClosing, isFr) else rawClosing
 
         return MldpCoverLetterData(
             senderName = deterministic.senderName,
@@ -753,23 +769,32 @@ Reply ONLY with valid pure JSON (no markdown code fences):
         }
 
         if (settings.hasAnyAiKey()) {
+            val humanizeNote = if (settings.humanizeWritingEnabled) {
+                if (isFr) {
+                    "Écris sur un ton humain naturel, direct et posé (zéro phrase robotique, zéro tiret cadratin —, zéro cliché IA)."
+                } else {
+                    "Write in a natural, conversational-professional human voice (short concrete sentences, zero em-dashes —, zero AI buzzwords like 'thrilled' or 'aligns closely')."
+                }
+            } else ""
             val prompt = """
-Rédige un court e-mail de relance courtois et professionnel (80 à 120 mots max) en ${if (isFr) "FRANÇAIS" else "ANGLAIS"}.
+Rédige un court e-mail de relance courtois, naturel et humain (75 à 110 mots max) en ${if (isFr) "FRANÇAIS" else "ANGLAIS"}.
+$humanizeNote
 Objet suggéré : $defaultSubject
 Candidat : ${profile.fullName}
 Entreprise : ${offer.company}
 Poste : ${offer.title}
 Atouts principaux ciblés : ${targeted.skills.take(3).joinToString(", ")}
-Expérience clé : ${targeted.experiences.firstOrNull()?.let { "${it.title} (${it.company})" } ?: targeted.title}
+Expérience clé : ${targeted.experiences.firstOrNull()?.let { "${localizeCvTerm(it.title, isFr)} (${it.company})" } ?: localizeCvTerm(targeted.title, isFr)}
 Réponds UNIQUEMENT par le corps du message (sans objet ni balises markdown).
             """.trimIndent()
             val aiBody = LlmClient.generateWithFreeFallback(
                 settings,
                 prompt,
-                "Tu rédiges des emails de relance professionnels concis et respectueux."
+                "Tu écris des messages de suivi simples, directs et humains sans jamais sonner comme un modèle automatique."
             ).getOrNull()?.text?.trim()
-            if (!aiBody.isNullOrBlank() && aiBody.length >= 60) {
-                return defaultSubject to aiBody
+            if (!aiBody.isNullOrBlank() && aiBody.length >= 60 && isStrictlyTargetLanguage(aiBody, isFr)) {
+                val polished = if (settings.humanizeWritingEnabled) humanizeBusinessText(aiBody, isFr) else aiBody
+                return defaultSubject to polished
             }
         }
 
@@ -777,31 +802,81 @@ Réponds UNIQUEMENT par le corps du message (sans objet ni balises markdown).
             """
 Madame, Monsieur,
 
-Je me permets de revenir vers vous concernant ma candidature au poste de ${offer.title} au sein de ${offer.company}.
+Je me permets de prendre brièvement des nouvelles suite à ma candidature pour le poste de ${offer.title} au sein de ${offer.company}.
 
-Toujours vivement intéressé(e) par cette opportunité et convaincu(e) que mon expérience en ${targeted.skills.take(3).joinToString(", ").ifBlank { targeted.title }} répond aux besoins de votre équipe, je reste à votre entière disposition pour convenir d'un échange téléphonique ou d'un entretien à votre convenance.
+Votre besoin reste en phase avec mon travail récent en ${targeted.skills.take(3).joinToString(", ") { localizeCvTerm(it, true) }.ifBlank { localizeCvTerm(targeted.title, true) }}. Je reste disponible cette semaine si vous souhaitez échanger quelques minutes par téléphone ou lors d'un entretien.
 
-Je vous remercie par avance de votre retour et vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.
+Merci par avance pour votre retour, et bonne continuation à votre équipe.
 
+Cordialement,
 ${profile.fullName}
 ${listOfNotNull(profile.phone.ifBlank { null }, profile.email.ifBlank { null }).joinToString(" | ")}
             """.trim()
         } else {
             """
-Dear Hiring Team,
+Hello,
 
-I am writing to kindly follow up on my application for the ${offer.title} role at ${offer.company}.
+I wanted to follow up briefly on my application for the ${offer.title} position at ${offer.company}.
 
-I remain strongly interested in contributing to your team, bringing hands-on expertise in ${targeted.skills.take(3).joinToString(", ").ifBlank { targeted.title }}. I would welcome the opportunity to discuss how my background aligns with your current goals.
+My recent work in ${targeted.skills.take(3).joinToString(", ") { localizeCvTerm(it, false) }.ifBlank { localizeCvTerm(targeted.title, false) }} directly fits what your team is looking for, and I would gladly take a few minutes for a call or interview at your convenience.
 
-Thank you for your time and consideration. I look forward to hearing from you.
+Thank you for your time.
 
 Best regards,
 ${profile.fullName}
 ${listOfNotNull(profile.phone.ifBlank { null }, profile.email.ifBlank { null }).joinToString(" | ")}
             """.trim()
         }
-        return defaultSubject to fallbackBody
+        val finalBody = if (settings.humanizeWritingEnabled) humanizeBusinessText(fallbackBody, isFr) else fallbackBody
+        return defaultSubject to finalBody
+    }
+
+    /**
+     * Post-processes LLM or template copy so cover letters & follow-up emails read like genuine
+     * human writing rather than templated AI prose (removes em-dashes, markdown artifacts, and AI clichés).
+     */
+    private fun humanizeBusinessText(raw: String, isFrench: Boolean): String {
+        var text = raw
+            .replace("**", "")
+            .replace("__", "")
+            .replace(" — ", ", ")
+            .replace("—", ", ")
+            .replace(" – ", ", ")
+            .replace(Regex("[ \t]+"), " ")
+            .replace(Regex(" ,"), ",")
+            .trim()
+
+        val replacements = if (isFrench) {
+            listOf(
+                "C’est avec un vif intérêt que je vous adresse" to "Je vous adresse",
+                "C'est avec un vif intérêt que je vous adresse" to "Je vous adresse",
+                "constitue un environnement stimulant où" to "correspond à un cadre où",
+                "constitue une opportunité unique" to "représente une belle étape",
+                "je suis convaincu(e) que mon profil" to "mon parcours montre que je peux",
+                "je suis convaincu que mon profil" to "mon parcours montre que je peux",
+                "atout indéniable" to "appui concret",
+                "avec rigueur et professionnalisme" to "avec méthode et fiabilité",
+                "force de proposition" to "proactif",
+                "Je serais ravi(e) de vous rencontrer" to "Je reste disponible pour vous rencontrer"
+            )
+        } else {
+            listOf(
+                "I am thrilled to apply" to "I am writing to apply",
+                "I am delighted to apply" to "I am writing to apply",
+                "stands out as an organization where" to "is a team where",
+                "is a testament to my" to "reflects my",
+                "leverage my expertise in" to "apply my experience in",
+                "aligns closely with" to "matches well with",
+                "deeply resonates with me" to "fits how I like to work",
+                "delve into" to "work closely on",
+                "seamless collaboration" to "smooth teamwork",
+                "dynamic team" to "team"
+            )
+        }
+        for ((cliche, natural) in replacements) {
+            text = text.replace(cliche, natural, ignoreCase = true)
+        }
+        return text
     }
 
     /**

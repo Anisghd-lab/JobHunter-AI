@@ -101,6 +101,7 @@ fun RadarScreen(
     onApplyClick: (JobOffer) -> Unit,
     onRegenerateOfferClick: (JobOffer) -> Unit = {},
     onToggleCvMode: (JobOffer, Boolean) -> Unit = { _, _ -> },
+    onOpenWebPortal: (JobOffer) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val rawOffers by offersFlow.collectAsState()
@@ -294,6 +295,7 @@ fun RadarScreen(
             isRegenerating = busyOfferId == activeOutcome.updatedOffer.id,
             onRegenerate = { onRegenerateOfferClick(activeOutcome.updatedOffer) },
             onSwitchCvMode = { useTailored -> onToggleCvMode(activeOutcome.updatedOffer, useTailored) },
+            onOpenWebPortal = { onOpenWebPortal(activeOutcome.updatedOffer) },
             onDismiss = onDismissOutcome,
             onMarkApplied = { onMarkAsApplied(activeOutcome.updatedOffer) }
         )
@@ -610,6 +612,7 @@ fun ApplyAssistantDialog(
     isRegenerating: Boolean = false,
     onRegenerate: () -> Unit = {},
     onSwitchCvMode: (Boolean) -> Unit = {},
+    onOpenWebPortal: () -> Unit = {},
     onDismiss: () -> Unit,
     onMarkApplied: () -> Unit
 ) {
@@ -775,9 +778,21 @@ fun ApplyAssistantDialog(
 
                 if (offer.url.startsWith("http")) {
                     GlassSolidButton(
-                        text = "Ouvrir l'offre Web ↗",
+                        text = "Assistant Web (Formulaire + CAPTCHA)",
                         icon = Icons.Default.OpenInBrowser,
                         containerColor = Palette.emeraldSolidBg,
+                        onClick = {
+                            onDismiss()
+                            onOpenWebPortal()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    GlassSoftButton(
+                        text = "Ouvrir Navigateur Externe ↗",
+                        icon = Icons.Default.OpenInBrowser,
+                        accentColor = Palette.electricBlue,
+                        height = 38.dp,
                         onClick = {
                             val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             cb.setPrimaryClip(ClipData.newPlainText("Lettre", offer.generatedLetter))

@@ -67,6 +67,8 @@ import com.ghdinteractivestudio.jobhunter.data.local.FreeLlmProvider
 import com.ghdinteractivestudio.jobhunter.data.local.SettingsRepository
 import com.ghdinteractivestudio.jobhunter.domain.ai.LlmClient
 import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomationManager
+import com.ghdinteractivestudio.jobhunter.domain.automation.JobPortalAccount
+import com.ghdinteractivestudio.jobhunter.domain.automation.PortalSessionRegistry
 import com.ghdinteractivestudio.jobhunter.domain.email.EmailDispatcher
 import com.ghdinteractivestudio.jobhunter.service.JobHunterForegroundService
 import com.ghdinteractivestudio.jobhunter.ui.components.GlassFilterChip
@@ -91,6 +93,7 @@ fun AgentScreen(
     todayAutoCount: Int = 0,
     isRunningAutomation: Boolean = false,
     onRunAutomationNowClick: () -> Unit = {},
+    onOpenPortalSetupClick: (JobPortalAccount) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -102,6 +105,8 @@ fun AgentScreen(
     var isTestingAi by remember { mutableStateOf(false) }
     var emailTestMsg by remember { mutableStateOf<String?>(null) }
     var isTestingEmail by remember { mutableStateOf(false) }
+    var portalTestMsg by remember { mutableStateOf<String?>(null) }
+    var testingPortalId by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = modifier
@@ -195,10 +200,13 @@ fun AgentScreen(
 
                 Spacer(Modifier.height(8.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(60, 70, 80).forEach { threshold ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(50, 60, 70, 80).forEach { threshold ->
                         GlassFilterChip(
-                            text = "Seuil $threshold%",
+                            text = "$threshold%",
                             selected = settings.autoApplyMinScore == threshold,
                             selectedColor = Palette.blueSolidBg,
                             onClick = { settingsRepo.update { it.copy(autoApplyMinScore = threshold) } }
@@ -220,7 +228,7 @@ fun AgentScreen(
                             color = Palette.text
                         )
                         Text(
-                            text = "Actif (recommandé) = envoie uniquement aux offres avec email recruteur vérifié. Sinon prépare aussi les portails Web.",
+                            text = "Actif = 100% auto par Email uniquement. Désactivé (recommandé) = envoie auto par Email + prépare les Portails Web (>= seuil) pour l'Assistant Inscription / CAPTCHA.",
                             style = Type.label,
                             color = Palette.secondary
                         )
@@ -244,12 +252,17 @@ fun AgentScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf(5, 10, 15).forEach { maxPerDay ->
+                    listOf(10, 25, 50).forEach { maxPerDay ->
                         GlassFilterChip(
                             text = "Max $maxPerDay/j",
                             selected = settings.autoApplyMaxPerDay == maxPerDay,
                             selectedColor = Palette.emeraldSolidBg,
-                            onClick = { settingsRepo.update { it.copy(autoApplyMaxPerDay = maxPerDay) } }
+                            onClick = {
+                                val cycleCap = if (maxPerDay >= 25) 12 else 5
+                                settingsRepo.update {
+                                    it.copy(autoApplyMaxPerDay = maxPerDay, autoApplyMaxPerCycle = cycleCap)
+                                }
+                            }
                         )
                     }
                 }
@@ -289,6 +302,38 @@ fun AgentScreen(
                     onClick = onRunAutomationNowClick,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(Modifier.height(10.dp))
+
+                // Humanize Style Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Humanize IA (Écriture 100% Humaine)",
+                            style = Type.bodySmall.bold,
+                            color = Palette.text
+                        )
+                        Text(
+                            text = "Élimine les tics LLM et clichés robotiques dans toutes vos lettres et emails de relance.",
+                            style = Type.label,
+                            color = Palette.secondary
+                        )
+                    }
+                    Switch(
+                        checked = settings.humanizeWritingEnabled,
+                        onCheckedChange = { hum ->
+                            settingsRepo.update { it.copy(humanizeWritingEnabled = hum) }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Palette.emeraldSolidBg
+                        )
+                    )
+                }
 
                 Spacer(Modifier.height(10.dp))
 
@@ -887,6 +932,135 @@ fun AgentScreen(
                         else -> Palette.secondary
                     }
                 )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // 5. Web Portals Accounts & Session Connection Tests (Human Login & CAPTCHA Safe)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .glassCard()
+                .padding(18.dp)
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Link,
+                        contentDescription = null,
+                        tint = Palette.emeraldAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "COMPTES PORTAILS WEB (CONNEXION & TEST)",
+                        style = Type.mono.bold,
+                        color = Palette.emeraldAccent
+                    )
+                }
+
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Créez votre compte et passez le CAPTCHA dans le navigateur intégré : votre session reste connectée pour postuler sans friction. (Careem/Tamara Greenhouse & LeanTech Ashby ne demandent aucun compte préalable.)",
+                    style = Type.label,
+                    color = Palette.secondary
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                PortalSessionRegistry.portals.forEach { portal ->
+                    val isConnected = settings.isPortalConnected(portal.id)
+                    val isTestingThis = testingPortalId == portal.id
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .background(Palette.plateBackground, RoundedRectangle(10.dp))
+                            .border(
+                                0.5.dp,
+                                if (isConnected) Palette.emeraldAccent.copy(alpha = 0.45f) else Palette.attention.copy(alpha = 0.35f),
+                                RoundedRectangle(10.dp)
+                            )
+                            .padding(10.dp)
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "${portal.badge} · ${portal.name}",
+                                        style = Type.bodySmall.bold,
+                                        color = Palette.text
+                                    )
+                                    Text(
+                                        text = portal.description,
+                                        style = Type.label,
+                                        color = Palette.secondary
+                                    )
+                                }
+                                Text(
+                                    text = if (isConnected) "✓ Connecté" else "À connecter",
+                                    style = Type.label.bold.monospaced,
+                                    color = if (isConnected) Palette.emeraldAccent else Palette.attention
+                                )
+                            }
+
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                GlassSolidButton(
+                                    text = if (isConnected) "Ouvrir Session" else "Créer / Connecter",
+                                    icon = Icons.Default.OpenInBrowser,
+                                    containerColor = Palette.emeraldSolidBg,
+                                    height = 38.dp,
+                                    onClick = { onOpenPortalSetupClick(portal) },
+                                    modifier = Modifier.weight(1.2f)
+                                )
+                                GlassSoftButton(
+                                    text = if (isTestingThis) "Test..." else "Tester",
+                                    icon = Icons.Default.CheckCircle,
+                                    accentColor = Palette.electricBlue,
+                                    isLoading = isTestingThis,
+                                    height = 38.dp,
+                                    onClick = {
+                                        if (testingPortalId != null) return@GlassSoftButton
+                                        testingPortalId = portal.id
+                                        portalTestMsg = null
+                                        coroutineScope.launch {
+                                            val res = PortalSessionRegistry.testPortalConnection(portal)
+                                            settingsRepo.update { it.withPortalStatus(portal.id, res.connected) }
+                                            portalTestMsg = res.message
+                                            testingPortalId = null
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (portalTestMsg != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Palette.plateBackground, RoundedRectangle(8.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = portalTestMsg ?: "",
+                            style = Type.label.monospaced,
+                            color = if (portalTestMsg!!.startsWith("✓")) Palette.emeraldAccent else Palette.danger
+                        )
+                    }
+                }
             }
         }
 

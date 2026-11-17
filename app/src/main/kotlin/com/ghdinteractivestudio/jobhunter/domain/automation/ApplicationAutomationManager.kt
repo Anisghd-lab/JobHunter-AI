@@ -424,7 +424,7 @@ object ApplicationAutomationManager {
                 recruiterEmail = finalEmail,
                 applicationMethod = if (finalEmail.isNotBlank()) "EMAIL" else offer.applicationMethod,
                 lastAutoAttemptAt = prev?.lastAutoAttemptAt ?: 0L,
-                matchScore = maxOf(offer.matchScore, prev?.matchScore ?: 0),
+                matchScore = if (!prev?.aiReasoning.isNullOrBlank()) maxOf(offer.matchScore, prev!!.matchScore) else offer.matchScore,
                 deadlineAt = if (offer.deadlineAt > 0L) offer.deadlineAt else (prev?.deadlineAt ?: 0L),
                 deadlineLabel = offer.deadlineLabel.ifBlank { prev?.deadlineLabel.orEmpty() }
             )
@@ -526,10 +526,13 @@ object ApplicationAutomationManager {
             .map { normalizeSignatureKey(it.company, it.title) }
             .toMutableSet()
 
-        // Sort prioritized candidates: valid direct email first among >= threshold, then highest matchScore
+        // Re-score non-AI cached rows with latest domain guard so out-of-profile tech/medical titles drop out immediately
         val minEligibilityScore = (initialSettings.autoApplyMinScore - 15).coerceAtLeast(45)
-        val rawCandidates = dao.getTopAutoApplyCandidates(limit = 40)
-            .map { it.toDomain() }
+        val rawCandidates = dao.getTopAutoApplyCandidates(limit = 120)
+            .map { entity ->
+                val domain = entity.toDomain()
+                if (domain.aiReasoning.isBlank()) scanner.rescoreWithProfile(domain, migratedProfile) else domain
+            }
             .filter { !DeadlineParser.isExpiredOrStale(it, now) && it.matchScore >= minEligibilityScore }
             .sortedWith(
                 compareByDescending<JobOffer> { HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
@@ -553,9 +556,9 @@ object ApplicationAutomationManager {
                 continue
             }
 
-            // Skip recently attempted web-only offers during background cycles (re-check after 6h)
-            val recentlyAttempted = candidate.lastAutoAttemptAt > 0L && (now - candidate.lastAutoAttemptAt) < 6 * 3_600_000L
-            if (!forceRun && recentlyAttempted && cleanCandEmail.isBlank()) {
+            // Skip recently attempted web-only offers (within 2h) so cycles progress deeper through unvisited ads
+            val recentlyAttempted = candidate.lastAutoAttemptAt > 0L && (now - candidate.lastAutoAttemptAt) < 2 * 3_600_000L
+            if (recentlyAttempted && cleanCandEmail.isBlank()) {
                 continue
             }
 
@@ -563,7 +566,7 @@ object ApplicationAutomationManager {
             var enrichedOffer = candidate
             if (!HtmlSanitizer.isValidRecruiterEmail(enrichedOffer.recruiterEmail) &&
                 enrichedOffer.url.startsWith("http") &&
-                liveLookups < 10
+                liveLookups < 35
             ) {
                 liveLookups++
                 val details = scanner.fetchOfferLiveDetails(enrichedOffer.url)
@@ -633,7 +636,7 @@ object ApplicationAutomationManager {
                     (sentToday + sentCount) >= liveSettings.autoApplyMaxPerDay
                 ) break
 
-                if (sentCount > 0) delay(8_000L)
+                if (sentCount > 0) delay(300L)
 
                 val outcome = prepareAndApply(
                     context = context,
@@ -653,7 +656,7 @@ object ApplicationAutomationManager {
 
                 // Abort cycle cleanly if an SMTP auth error tripped smtpAuthPaused
                 if (settingsRepo.settings.value.smtpAuthPaused) break
-            } else if (!liveSettings.autoApplyEmailOnly && webPreparedCount < 2) {
+            } else if (!liveSettings.autoApplyEmailOnly && webPreparedCount < 5) {
                 val outcome = prepareAndApply(
                     context = context,
                     offer = evaluated,

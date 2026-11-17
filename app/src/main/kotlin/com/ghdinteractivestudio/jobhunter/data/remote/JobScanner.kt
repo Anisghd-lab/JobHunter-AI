@@ -311,115 +311,120 @@ class JobScanner {
     }
 
     private fun fetchEmploiticDz(query: String): List<JobOffer> {
-        val url = if (query.isBlank()) {
-            "https://emploitic.com/offres-d-emploi"
-        } else {
-            "https://emploitic.com/offres-d-emploi?q=${URLEncoder.encode(query, "UTF-8")}"
-        }
-
-        val request = Request.Builder().url(url).header("User-Agent", UA).build()
         val offers = mutableListOf<JobOffer>()
-
-        httpClient.newCall(request).execute().use { resp ->
-            if (!resp.isSuccessful) return emptyList()
-            val html = resp.body?.string() ?: return emptyList()
-
-            // Extract exact job detail hrefs indexed by alias suffix
-            val hrefRegex = Regex("""href="([^"]*/offres-d-emploi/[^"]+)"""")
-            val hrefList = hrefRegex.findAll(html).map { it.groupValues[1] }.toList()
-
-            val nextDataMatch = Regex("""<script id="__NEXT_DATA__" type="application/json">(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
-                .find(html) ?: return emptyList()
-
-            val root = json.parseToJsonElement(nextDataMatch.groupValues[1]).jsonObject
-            val dataList = root["props"]?.jsonObject
-                ?.get("pageProps")?.jsonObject
-                ?.get("searchResult")?.jsonObject
-                ?.get("data")?.jsonArray ?: return emptyList()
-
-            for (el in dataList) {
-                val obj = el.jsonObject
-                val id = obj.str("id")
-                val rawTitle = obj.str("title")
-                val alias = obj.str("alias")
-                if (rawTitle.isBlank() || alias.isBlank()) continue
-
-                val title = HtmlSanitizer.cleanToReadableText(rawTitle)
-                val cleanDesc = HtmlSanitizer.cleanToReadableText(obj.str("description"))
-                if (cleanDesc.isBlank()) continue
-
-                val companyName = obj["company"]?.takeIf { it !is JsonNull }?.jsonObject?.str("name")
-                    ?.ifBlank { "Entreprise Confidentielle (Algérie)" }
-                    ?: "Entreprise Confidentielle (Algérie)"
-
-                val locations = obj["location"]?.takeIf { it is JsonArray }?.jsonArray
-                    ?.mapNotNull { it.jsonObject.str("label").takeIf(String::isNotBlank) }
-                    ?: emptyList()
-                val locationText = locations.firstOrNull() ?: "Algérie"
-
-                val contracts = obj["contractType"]?.takeIf { it is JsonArray }?.jsonArray
-                    ?.mapNotNull { it.jsonObject.str("label").takeIf(String::isNotBlank) }
-                    ?: emptyList()
-                val contractStr = contracts.joinToString(" / ").ifBlank { "Contrat Algérie" }
-
-                val rawWorkMode = obj.str("workMode").lowercase()
-                val isRemote = rawWorkMode.contains("remote") || rawWorkMode.contains("télétravail")
-                val workModeLabel = when {
-                    isRemote -> "REMOTE"
-                    rawWorkMode.contains("hybrid") -> "HYBRID"
-                    else -> "ONSITE"
-                }
-
-                val professions = obj["profession"]?.takeIf { it is JsonArray }?.jsonArray
-                    ?.mapNotNull { it.jsonObject.str("label").takeIf(String::isNotBlank) }
-                    ?: emptyList()
-                val apiTags = obj["tags"]?.takeIf { it is JsonArray }?.jsonArray
-                    ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf(String::isNotBlank) }
-                    ?: emptyList()
-
-                val matchedHref = hrefList.firstOrNull { it.endsWith(alias) }
-                val jobUrl = when {
-                    matchedHref != null && matchedHref.startsWith("http") -> matchedHref
-                    matchedHref != null -> "https://emploitic.com$matchedHref"
-                    else -> "https://emploitic.com/offres-d-emploi?q=${URLEncoder.encode(title, "UTF-8")}"
-                }
-
-                val recruiterEmail = HtmlSanitizer.extractRecruiterEmail(cleanDesc)
-                val rawPubAt = obj.str("publishedAt")
-                val publishedAt = rawPubAt.take(10)
-
-                val tags = buildList {
-                    add("🇩🇿 Algérie")
-                    add(when (workModeLabel) { "REMOTE" -> "Remote"; "HYBRID" -> "Hybride"; else -> "Présentiel" })
-                    addAll(contracts.take(2))
-                    addAll(professions.take(2))
-                    addAll(apiTags.take(3))
-                }.distinct()
-
-                offers.add(
-                    JobOffer(
-                        id = "emploitic_$id",
-                        title = title,
-                        company = companyName,
-                        location = locationText,
-                        isRemote = isRemote,
-                        contractType = contractStr,
-                        description = cleanDesc,
-                        sourcePlatform = "Emploitic Algérie",
-                        url = jobUrl,
-                        detectedAt = System.currentTimeMillis(),
-                        requiredFormat = detectFormatFromText(cleanDesc),
-                        recruiterEmail = recruiterEmail,
-                        tags = tags,
-                        regionScope = "ALGERIA",
-                        workMode = workModeLabel,
-                        applicationMethod = if (recruiterEmail.isNotBlank()) "EMAIL" else "WEBSITE",
-                        publishedDate = publishedAt
-                    ).withDeadlineCheck(rawPublished = rawPubAt)
-                )
+        val pages = if (query.isBlank()) listOf(1, 2) else listOf(1, 2)
+        for (pageNum in pages) {
+            val url = when {
+                query.isBlank() && pageNum == 1 -> "https://emploitic.com/offres-d-emploi"
+                query.isBlank() -> "https://emploitic.com/offres-d-emploi?page=$pageNum"
+                pageNum == 1 -> "https://emploitic.com/offres-d-emploi?q=${URLEncoder.encode(query, "UTF-8")}"
+                else -> "https://emploitic.com/offres-d-emploi?q=${URLEncoder.encode(query, "UTF-8")}&page=$pageNum"
             }
+
+            val request = Request.Builder().url(url).header("User-Agent", UA).build()
+            val pageCountBefore = offers.size
+
+            httpClient.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) return@use
+                val html = resp.body?.string() ?: return@use
+
+                val hrefRegex = Regex("""href="([^"]*/offres-d-emploi/[^"]+)"""")
+                val hrefList = hrefRegex.findAll(html).map { it.groupValues[1] }.toList()
+
+                val nextDataMatch = Regex("""<script id="__NEXT_DATA__" type="application/json">(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
+                    .find(html) ?: return@use
+
+                val root = json.parseToJsonElement(nextDataMatch.groupValues[1]).jsonObject
+                val dataList = root["props"]?.jsonObject
+                    ?.get("pageProps")?.jsonObject
+                    ?.get("searchResult")?.jsonObject
+                    ?.get("data")?.jsonArray ?: return@use
+
+                for (el in dataList) {
+                    val obj = el.jsonObject
+                    val id = obj.str("id")
+                    val rawTitle = obj.str("title")
+                    val alias = obj.str("alias")
+                    if (rawTitle.isBlank() || alias.isBlank()) continue
+
+                    val title = HtmlSanitizer.cleanToReadableText(rawTitle)
+                    val cleanDesc = HtmlSanitizer.cleanToReadableText(obj.str("description"))
+                    if (cleanDesc.isBlank()) continue
+
+                    val companyName = obj["company"]?.takeIf { it !is JsonNull }?.jsonObject?.str("name")
+                        ?.ifBlank { "Entreprise Confidentielle (Algérie)" }
+                        ?: "Entreprise Confidentielle (Algérie)"
+
+                    val locations = obj["location"]?.takeIf { it is JsonArray }?.jsonArray
+                        ?.mapNotNull { it.jsonObject.str("label").takeIf(String::isNotBlank) }
+                        ?: emptyList()
+                    val locationText = locations.firstOrNull() ?: "Algérie"
+
+                    val contracts = obj["contractType"]?.takeIf { it is JsonArray }?.jsonArray
+                        ?.mapNotNull { it.jsonObject.str("label").takeIf(String::isNotBlank) }
+                        ?: emptyList()
+                    val contractStr = contracts.joinToString(" / ").ifBlank { "Contrat Algérie" }
+
+                    val rawWorkMode = obj.str("workMode").lowercase()
+                    val isRemote = rawWorkMode.contains("remote") || rawWorkMode.contains("télétravail")
+                    val workModeLabel = when {
+                        isRemote -> "REMOTE"
+                        rawWorkMode.contains("hybrid") -> "HYBRID"
+                        else -> "ONSITE"
+                    }
+
+                    val professions = obj["profession"]?.takeIf { it is JsonArray }?.jsonArray
+                        ?.mapNotNull { it.jsonObject.str("label").takeIf(String::isNotBlank) }
+                        ?: emptyList()
+                    val apiTags = obj["tags"]?.takeIf { it is JsonArray }?.jsonArray
+                        ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf(String::isNotBlank) }
+                        ?: emptyList()
+
+                    val matchedHref = hrefList.firstOrNull { it.endsWith(alias) }
+                    val jobUrl = when {
+                        matchedHref != null && matchedHref.startsWith("http") -> matchedHref
+                        matchedHref != null -> "https://emploitic.com$matchedHref"
+                        else -> "https://emploitic.com/offres-d-emploi?q=${URLEncoder.encode(title, "UTF-8")}"
+                    }
+
+                    val recruiterEmail = HtmlSanitizer.extractRecruiterEmail(cleanDesc)
+                    val rawPubAt = obj.str("publishedAt")
+                    val publishedAt = rawPubAt.take(10)
+
+                    val tags = buildList {
+                        add("🇩🇿 Algérie")
+                        add(when (workModeLabel) { "REMOTE" -> "Remote"; "HYBRID" -> "Hybride"; else -> "Présentiel" })
+                        addAll(contracts.take(2))
+                        addAll(professions.take(2))
+                        addAll(apiTags.take(3))
+                    }.distinct()
+
+                    offers.add(
+                        JobOffer(
+                            id = "emploitic_$id",
+                            title = title,
+                            company = companyName,
+                            location = locationText,
+                            isRemote = isRemote,
+                            contractType = contractStr,
+                            description = cleanDesc,
+                            sourcePlatform = "Emploitic Algérie",
+                            url = jobUrl,
+                            detectedAt = System.currentTimeMillis(),
+                            requiredFormat = detectFormatFromText(cleanDesc),
+                            recruiterEmail = recruiterEmail,
+                            tags = tags,
+                            regionScope = "ALGERIA",
+                            workMode = workModeLabel,
+                            applicationMethod = if (recruiterEmail.isNotBlank()) "EMAIL" else "WEBSITE",
+                            publishedDate = publishedAt
+                        ).withDeadlineCheck(rawPublished = rawPubAt)
+                    )
+                }
+            }
+            if (offers.size == pageCountBefore) break
         }
-        return offers
+        return offers.distinctBy { it.id }
     }
 
     private fun fetchArbeitnowJobs(keywords: List<String>): List<JobOffer> {
@@ -541,7 +546,8 @@ class JobScanner {
                         val category = attrs["data-job-categories"]?.takeIf { it.isNotBlank() && it != "Other" }.orEmpty()
                         val salary = attrs["data-job-salary"].orEmpty()
                         val rawDate = attrs["data-job-date"].orEmpty()
-                        val email = attrs["data-job-contact-email"]?.trim().orEmpty()
+                        val rawContactEmail = attrs["data-job-contact-email"]?.trim().orEmpty()
+                        val email = rawContactEmail.takeIf { HtmlSanitizer.isValidRecruiterEmail(it) }.orEmpty()
 
                         val isRemote = workplace.contains("remote", ignoreCase = true)
                         val workModeLabel = when {
@@ -593,9 +599,9 @@ class JobScanner {
             }
         }
 
-        // Enrich top prioritized matches with full JSON-LD JobPosting description & deadlines (fast cap: 8 fetches)
+        // Enrich top prioritized matches with full JSON-LD JobPosting description & deadlines (cap: 12 fetches)
         val prioritized = filterAndPrioritize(offers.distinctBy { it.url }, keywords, limit = 36).toMutableList()
-        for (i in 0 until minOf(8, prioritized.size)) {
+        for (i in 0 until minOf(12, prioritized.size)) {
             val base = prioritized[i]
             runCatching {
                 val req = Request.Builder().url(base.url).header("User-Agent", UA).build()
@@ -603,19 +609,29 @@ class JobScanner {
                     if (!resp.isSuccessful) return@use
                     val html = resp.body?.string() ?: return@use
                     val ldObj = extractFirstJobPostingJsonLd(html)
+                    val mailtoEmail = Regex("""mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})""", RegexOption.IGNORE_CASE)
+                        .findAll(html).map { it.groupValues[1].trim() }.firstOrNull { HtmlSanitizer.isValidRecruiterEmail(it) }
                     if (ldObj != null) {
                         val fullDesc = HtmlSanitizer.cleanToReadableText(ldObj.str("description"))
                         val rawPosted = ldObj.str("datePosted").ifBlank { base.publishedDate }
                         val validThroughMs = DeadlineParser.parseTimestamp(ldObj.str("validThrough"))
-                        val ldEmail = base.recruiterEmail.ifBlank { HtmlSanitizer.extractRecruiterEmail(fullDesc) }
-                        if (fullDesc.length > base.description.length) {
+                        val ldEmail = base.recruiterEmail
+                            .takeIf { HtmlSanitizer.isValidRecruiterEmail(it) }
+                            ?: mailtoEmail
+                            ?: HtmlSanitizer.extractRecruiterEmail(fullDesc)
+                        if (fullDesc.length > base.description.length || ldEmail.isNotBlank()) {
                             prioritized[i] = base.copy(
-                                description = fullDesc,
+                                description = if (fullDesc.length > base.description.length) fullDesc else base.description,
                                 recruiterEmail = ldEmail,
                                 applicationMethod = if (ldEmail.isNotBlank()) "EMAIL" else base.applicationMethod,
-                                requiredFormat = detectFormatFromText(fullDesc)
+                                requiredFormat = detectFormatFromText(fullDesc.ifBlank { base.description })
                             ).withDeadlineCheck(rawPublished = rawPosted, explicitExpiryMillis = validThroughMs)
                         }
+                    } else if (!mailtoEmail.isNullOrBlank()) {
+                        prioritized[i] = base.copy(
+                            recruiterEmail = mailtoEmail,
+                            applicationMethod = "EMAIL"
+                        )
                     }
                 }
             }
@@ -1163,12 +1179,45 @@ class JobScanner {
     }
 
     /**
+     * Public re-scoring entry point shared with auto-apply ranking so stale cached rows respect domain mismatch caps.
+     */
+    fun rescoreWithProfile(offer: JobOffer, profile: UserProfile?): JobOffer =
+        scoreWithCvDeterministically(offer, profile)
+
+    /**
      * Computes deterministic honest match pre-score against the real CV profile,
-     * including cross-language FR/EN equivalences for Algeria + Worldwide matching.
-     * NEVER invents matches; only lists competencies actually present in both CV and offer.
+     * including cross-language FR/EN equivalences and strict out-of-domain role rejection
+     * so specialized DevOps/Medical/Audit jobs do not outrank core HR/Admin matches.
      */
     private fun scoreWithCvDeterministically(offer: JobOffer, profile: UserProfile?): JobOffer {
         if (profile == null || profile.combinedSearchCorpus().isBlank()) return offer
+
+        val offerTitleLower = offer.title.lowercase()
+        val cvRoleCorpus = "${profile.title} ${profile.experiences.joinToString(" ") { it.title }}".lowercase()
+        val specializedOutOfDomain = listOf(
+            "endocrinologist", "physician", "doctor", "surgeon", "nurse", "pharmacist",
+            "clinical research", "dentist", "veterinar", "therapist", "psychiatrist",
+            "devops", "kubernetes", "terraform", "rails", "golang", "rust ", "c++",
+            "ios developer", "android developer", "staff engineer", "principal engineer",
+            "site reliability", "sre ", "audit associate", "tax manager", "cpa ", "actuary",
+            "sales development representative", "sdr "
+        )
+        val hasCoreDomainInTitle = listOf(
+            "human resources", "ressources humaines", "hr ", "hr-", " rh", "admin",
+            "administratif", "administrative", "payroll", "paie", "recruit", "recrutement",
+            "talent", "people ", "office ", "coordinator", "coordinateur", "teacher",
+            "enseignant", "professeur", "french", "français"
+        ).any { offerTitleLower.contains(it) }
+
+        val titleRoleMismatch = !hasCoreDomainInTitle && specializedOutOfDomain.any { marker ->
+            offerTitleLower.contains(marker) && !cvRoleCorpus.contains(marker)
+        }
+        if (titleRoleMismatch) {
+            return offer.copy(
+                matchScore = 32,
+                aiVerdict = if (offer.aiVerdict.isBlank()) "NON_ADAPTE" else offer.aiVerdict
+            )
+        }
 
         val jobCorpus = "${offer.title} ${offer.description} ${offer.tags.joinToString(" ")}".lowercase()
         val cvCorpus = profile.combinedSearchCorpus().lowercase()
@@ -1208,23 +1257,23 @@ class JobScanner {
             .map { it.trim().lowercase() }
             .filter { it.length >= 4 && it !in setOf("with", "and", "pour", "avec") }
             .distinct()
-        val titleMatches = titleWords.filter { jobCorpus.contains(it) }
+        val titleMatches = titleWords.filter { offerTitleLower.contains(it) }
 
         val combinedMatches = (matchedSkills + titleMatches.map { it.replaceFirstChar(Char::uppercase) }).distinct()
         if (combinedMatches.isEmpty()) {
             return offer.copy(
-                matchScore = if (offer.matchScore > 0) offer.matchScore else 15,
+                matchScore = 15,
                 aiVerdict = if (offer.aiVerdict.isBlank()) "NON_ADAPTE" else offer.aiVerdict
             )
         }
 
         val bonusTitleBoost = if (bilingualPairs.any { (terms, _) ->
-                terms.any { profile.title.lowercase().contains(it) } && terms.any { offer.title.lowercase().contains(it) }
-            }) 18f else 0f
+                terms.any { cvRoleCorpus.contains(it) } && terms.any { offerTitleLower.contains(it) }
+            }) 24f else 0f
 
-        val skillRatio = if (realSkills.isNotEmpty()) (matchedSkills.size.toFloat() / 6f).coerceAtMost(1f) * 58f else 22f
+        val skillRatio = if (realSkills.isNotEmpty()) (matchedSkills.size.toFloat() / 6f).coerceAtMost(1f) * 50f else 20f
         val titleBonus = (titleMatches.size.coerceAtMost(3) * 10f) + bonusTitleBoost
-        val computedScore = (skillRatio + titleBonus + 18f).toInt().coerceIn(25, 96)
+        val computedScore = (skillRatio + titleBonus + 16f).toInt().coerceIn(25, 96)
 
         val verdict = when {
             computedScore >= 60 -> "CONVIENT"
@@ -1233,7 +1282,7 @@ class JobScanner {
         }
 
         return offer.copy(
-            matchScore = maxOf(offer.matchScore, computedScore),
+            matchScore = computedScore,
             matchingHighlights = if (offer.matchingHighlights.isEmpty()) combinedMatches.take(6) else offer.matchingHighlights,
             aiVerdict = if (offer.aiVerdict.isBlank()) verdict else offer.aiVerdict
         )

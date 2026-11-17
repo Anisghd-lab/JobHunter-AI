@@ -135,21 +135,30 @@ class JobHunterForegroundService : Service() {
                         )
                     } else null
 
-                    // High-priority event alerts for real auto-applications or recruiter replies / interviews
+                    // High-priority event alerts for real auto-applications, recruiter replies, or ready Web Portals
                     if (followReport != null && followReport.interviewAlerts.isNotEmpty()) {
                         postEventNotification(
                             "Invitation Entretien Détectée !",
-                            followReport.interviewAlerts.joinToString(" · ").take(140)
+                            followReport.interviewAlerts.joinToString(" · ").take(140),
+                            openTab = "pipeline"
                         )
                     } else if (followReport != null && followReport.replyUpdatesCount > 0) {
                         postEventNotification(
                             "Nouvelle Réponse Recruteur (${followReport.replyUpdatesCount})",
-                            followReport.summary.take(140)
+                            followReport.summary.take(140),
+                            openTab = "pipeline"
                         )
                     } else if (batchReport != null && batchReport.sentByEmailCount > 0) {
                         postEventNotification(
                             "Candidature(s) Envoyée(s) Auto (${batchReport.sentByEmailCount})",
-                            batchReport.summary.take(140)
+                            batchReport.summary.take(140),
+                            openTab = "pipeline"
+                        )
+                    } else if (batchReport != null && batchReport.webPreparedCount > 0) {
+                        postEventNotification(
+                            "Portails Web Prêts (${batchReport.webPreparedCount}) — Compte / CAPTCHA",
+                            "Ouvrez Suivi → Web pour créer/valider votre session et finaliser vos dossiers prêts.",
+                            openTab = "pipeline"
                         )
                     }
 
@@ -193,11 +202,15 @@ class JobHunterForegroundService : Service() {
         }
     }
 
-    private fun postEventNotification(title: String, text: String) {
+    private fun postEventNotification(title: String, text: String, openTab: String = "pipeline") {
+        val targetIntent = Intent(this, MainActivity::class.java).apply {
+            putExtra("open_tab", openTab)
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
         val pendingIntent = PendingIntent.getActivity(
             this,
             1,
-            Intent(this, MainActivity::class.java),
+            targetIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notif = NotificationCompat.Builder(this, EVENTS_CHANNEL_ID)
