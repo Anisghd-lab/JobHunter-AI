@@ -34,16 +34,18 @@ Application Android native (Kotlin + Jetpack Compose Liquid Glass) servant d'age
   - Fond atmosphérique translucide `LiquidGlassBackdrop` identique en qualité entre Dark Obsidian OLED et Light Mode Crystal Givré.
   - Résolution définitive du contraste (suppression des fonds blancs/émeraude illisibles avec texte blanc grâce aux tokens `emeraldSolidBg`, `blueSolidBg`, `GlassSolidButton`, `GlassSoftButton`, `GlassFilterChip` et `glassFieldColors()`).
   - Uniformisation de la hauteur (`42dp` / `38dp`), des espacements et troncature sécurisée (`maxLines = 1`) sur tous les boutons sans débordement.
-- [x] **Module Email Autonome & Liaison Appli Yahoo (`EmailDispatcher`, `ApplicationAutomationManager`, `JobHunterForegroundService`, `PipelineScreen`, `AgentScreen`)** :
-  - Support `AUTH PLAIN` + `AUTH LOGIN` sur SMTP `465`/`587`, normalisation automatique des App Passwords (espaces Yahoo/Gmail), bascule auto de port, et diagnostic clair en cas de `535`.
-  - Liaison directe avec l'application **Yahoo Mail installée** (`<queries>`, `AccountManager` picker, envoi pré-rempli direct sans sélecteur via `com.yahoo.mobile.client.android.mail` + lien direct générateur App Password Yahoo `login.yahoo.com/myaccount/security`).
+- [x] **Module Email Autonome & Liaison Appli Yahoo (`EmailDispatcher`, `SettingsRepository`, `ApplicationAutomationManager`, `JobHunterForegroundService`, `PipelineScreen`, `AgentScreen`)** :
+  - Support `AUTH PLAIN` + `AUTH LOGIN` sur SMTP `465`/`587`, arrêt immédiat sur `535` / `#AUTH005` ou socket fermé (suppression de la cascade `AUTH LOGIN` / bascule `:587` qui provoquait les verrouillages `#AUTH005`), et affichage direct du diagnostic serveur Yahoo exact.
+  - Protection anti-blocage `smtpAuthPaused` (`canSendSilently()`): suspension automatique des tentatives IMAP/relance en arrière-plan dès qu'une erreur `535`/`#AUTH005` survient, réinitialisation automatique à la modification du mot de passe ou test réussi, et bouton `✕` pour vider instantanément l'App Password.
+  - Liaison directe avec l'application **Yahoo Mail installée** (`<queries>`, `AccountManager` picker, validation directe de la liaison dans *Tester Connexion Email* lorsque l'App Password est vide, envoi pré-rempli direct via `com.yahoo.mobile.client.android.mail` + lien direct générateur App Password Yahoo `login.yahoo.com/myaccount/security`).
   - Lecteur **IMAP TLS `993`** (`EXAMINE INBOX`) + classification IA (`classifyRecruiterReply`) + génération & envoi automatique de relance IA (`generateFollowUpEmail`, `Relancer IA`, `Suivi Réponses & Relances IA`).
   - Migration Room explicite `MIGRATION_3_4` (version 4 : `followUpCount`, `lastFollowUpAt`, `lastReplySummary`).
 
 ---
 
 ## 3. ⚠️ Dettes Techniques & Points de Vigilance
-- L'envoi silencieux et le suivi IMAP autonome nécessitent un **Mot de passe d'application** Yahoo/Gmail renseigné dans **Agent 24/7 → Configuration Email** (testable en 1 clic via *Tester Connexion Email*).
+- L'envoi silencieux en arrière-plan et le suivi IMAP autonome exigent un **Mot de passe d'application** valide (16 caractères) renseigné dans **Agent 24/7 → Configuration Email** (car Android interdit aux applications tierces de lire le jeton OAuth privé de l'application Yahoo Mail). Sans App Password (champ vidé via `✕`) + **Connecter Appli Yahoo** activé, l'envoi bascule sans erreur `535` sur l'application Yahoo Mail pré-remplie en 1 clic.
+- En cas de verrouillage temporaire Yahoo `#AUTH005`, attendre ~15 minutes avant de retester ou régénérer un nouveau Mot de passe d'application.
 - Clés API personnelles provisionnées localement dans le stockage privé du smartphone pour ne jamais exposer de secret dans le dépôt GitHub public.
 - Tests unitaires JVM locaux (`app/src/test`) absents ; validation assurée par compilation complète et exécution directe sur appareil physique.
 

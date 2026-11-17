@@ -84,9 +84,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/email/EmailDispatcher.kt": {
-    "mtime": 1794913862.2356677,
-    "seen": 1794913988.4783938,
-    "ast_hash": "ff362b08c9b5826f422eba8b350816e1",
+    "mtime": 1794916112.8414989,
+    "seen": 1794916345.7080657,
+    "ast_hash": "f852d2486910556c9046b7b10cf75a09",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/model/JobOffer.kt": {
@@ -132,9 +132,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/screens/AgentScreen.kt": {
-    "mtime": 1794913915.2916677,
-    "seen": 1794913988.4784312,
-    "ast_hash": "039d34f9d7a9a2fd0f0123f0eb0db14d",
+    "mtime": 1794916295.4734988,
+    "seen": 1794916345.7081122,
+    "ast_hash": "a6eacc2bbb8a1074a494fddc88509157",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/screens/CvScreen.kt": {
@@ -204,9 +204,9 @@
     "semantic_hash": ""
   },
   "PROJECT_STATE.md": {
-    "mtime": 1794913920.5956676,
-    "seen": 1794913988.478483,
-    "ast_hash": "209158831c9e949fee99a11302d582ea",
+    "mtime": 1794916308.1054988,
+    "seen": 1794916345.7081776,
+    "ast_hash": "7f0725f909c1b0961fb5f9b328702460",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-hdpi/ic_launcher.png": {
@@ -300,15 +300,15 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/SettingsRepository.kt": {
-    "mtime": 1794913867.5596676,
-    "seen": 1794913988.4783227,
-    "ast_hash": "188a79699bf37d5fa5b278e97ece3033",
+    "mtime": 1794916124.485499,
+    "seen": 1794916345.7078815,
+    "ast_hash": "39c009d99686b98dbfb4d7d96f686d22",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/automation/ApplicationAutomationManager.kt": {
-    "mtime": 1794913870.1636677,
-    "seen": 1794913988.4783573,
-    "ast_hash": "e562387a29eb2b6350a8f2daf32e3b22",
+    "mtime": 1794916130.9054987,
+    "seen": 1794916345.7080204,
+    "ast_hash": "c96638f0c0bc81abb881efb1b1be9587",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/document/HtmlSanitizer.kt": {

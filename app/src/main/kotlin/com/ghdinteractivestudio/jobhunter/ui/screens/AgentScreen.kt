@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.LightMode
@@ -43,6 +44,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -553,8 +555,20 @@ fun AgentScreen(
 
                 OutlinedTextField(
                     value = settings.smtpPassword,
-                    onValueChange = { v -> settingsRepo.update { it.copy(smtpPassword = v) } },
-                    label = { Text("Mot de passe d'application (App Password)") },
+                    onValueChange = { v ->
+                        settingsRepo.update { it.copy(smtpPassword = v, smtpAuthPaused = false) }
+                    },
+                    label = { Text("Mot de passe d'application (16 car.)") },
+                    trailingIcon = if (settings.smtpPassword.isNotBlank()) {
+                        {
+                            IconButton(onClick = {
+                                settingsRepo.update { it.copy(smtpPassword = "", smtpAuthPaused = false) }
+                                emailTestMsg = "Mot de passe effacé — mode Appli Yahoo Mail prêt."
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "Effacer", tint = Palette.secondary)
+                            }
+                        }
+                    } else null,
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     colors = glassFieldColors(),
@@ -626,30 +640,51 @@ fun AgentScreen(
 
                 Spacer(Modifier.height(10.dp))
 
-                // Live SMTP / Auth Test Button
+                val yahooPackage = "com.yahoo.mobile.client.android.mail"
+                val isYahooInstalled = remember(context) {
+                    runCatching { context.packageManager.getPackageInfo(yahooPackage, 0) }.isSuccess
+                }
+
+                // Live Email Test Button (tests SMTP when App Password entered, or Yahoo App binding when App Mode active)
                 GlassSolidButton(
                     text = if (isTestingEmail) "Test connexion Email..." else "Tester Connexion Email",
                     icon = Icons.Default.CheckCircle,
                     containerColor = Palette.blueSolidBg,
                     isLoading = isTestingEmail,
                     onClick = {
+                        if (settings.smtpPassword.isBlank()) {
+                            if (settings.preferInstalledYahooApp && isYahooInstalled) {
+                                emailTestMsg = "✓ Appli Yahoo Mail installée & liée (${settings.senderEmail}). L'envoi ouvrira Yahoo Mail pré-rempli en 1 clic (ajoutez un Mot de passe d'application 16 car. ci-dessus uniquement pour l'envoi 100 % silencieux)."
+                            } else {
+                                emailTestMsg = "✗ Saisissez un Mot de passe d'application Yahoo 16 lettres OU appuyez sur « Connecter Appli Yahoo »."
+                            }
+                            return@GlassSolidButton
+                        }
                         isTestingEmail = true
                         emailTestMsg = null
+                        settingsRepo.update { it.copy(smtpAuthPaused = false) }
                         coroutineScope.launch {
                             val disp = EmailDispatcher(ApplicationAutomationManager.buildEmailConfig(settings))
                             val smtpRes = disp.testSmtpConnection()
-                            val imapRes = if (smtpRes.isSuccess && settings.smtpPassword.isNotBlank()) {
+                            val imapRes = if (smtpRes.isSuccess) {
                                 disp.fetchRecentInboxReplies(maxMessages = 3)
                             } else null
                             emailTestMsg = smtpRes.fold(
                                 onSuccess = { msg ->
+                                    settingsRepo.update { it.copy(smtpAuthPaused = false) }
                                     val imapInfo = imapRes?.fold(
                                         onSuccess = { " · IMAP OK (${it.size} réc.)" },
                                         onFailure = { " · IMAP: ${it.message?.take(35)}" }
                                     ) ?: ""
                                     "$msg$imapInfo"
                                 },
-                                onFailure = { "✗ ${it.message}" }
+                                onFailure = { err ->
+                                    val msg = err.message.orEmpty()
+                                    if (msg.contains("535") || msg.contains("refusés") || msg.contains("AUTH005")) {
+                                        settingsRepo.update { it.copy(smtpAuthPaused = true) }
+                                    }
+                                    "✗ $msg"
+                                }
                             )
                             isTestingEmail = false
                         }
@@ -659,10 +694,6 @@ fun AgentScreen(
 
                 Spacer(Modifier.height(8.dp))
 
-                val yahooPackage = "com.yahoo.mobile.client.android.mail"
-                val isYahooInstalled = remember(context) {
-                    runCatching { context.packageManager.getPackageInfo(yahooPackage, 0) }.isSuccess
-                }
                 val yahooAccountPicker = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
                 ) { result ->
@@ -756,13 +787,18 @@ fun AgentScreen(
 
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = if (settings.hasEmailCredentials()) {
-                        "✓ Identifiants configurés : envoi direct & suivi autonome prêts."
-                    } else {
-                        "Astuce Yahoo/Gmail : créez un « Mot de passe d'application » (16 caractères, espaces gérés auto) dans Sécurité du compte pour autoriser l'envoi + suivi 100 % autonome."
+                    text = when {
+                        settings.canSendSilently() -> "✓ Envoi silencieux SMTP & suivi IMAP actifs."
+                        settings.smtpAuthPaused -> "⚠️ SMTP mis en pause suite à une erreur 535 (utilisez un App Password 16 car. valide, ou envoyez via Appli Yahoo Mail ci-dessus)."
+                        settings.preferInstalledYahooApp && isYahooInstalled -> "✓ Mode Appli Yahoo Mail lié : chaque dossier préparé s'ouvre en 1 clic dans Yahoo Mail."
+                        else -> "Astuce Yahoo : sans Mot de passe d'application (16 car.), appuyez sur « Connecter Appli Yahoo » pour envoyer via Yahoo Mail sans erreur 535."
                     },
                     style = Type.label,
-                    color = if (settings.hasEmailCredentials()) Palette.emeraldAccent else Palette.secondary
+                    color = when {
+                        settings.canSendSilently() || (settings.preferInstalledYahooApp && isYahooInstalled) -> Palette.emeraldAccent
+                        settings.smtpAuthPaused -> Palette.attention
+                        else -> Palette.secondary
+                    }
                 )
             }
         }

@@ -81,6 +81,7 @@ data class AppSettings(
     val followUpDelayDays: Int = 5,
     val preferInstalledYahooApp: Boolean = false,
     val connectedYahooPackage: String = "",
+    val smtpAuthPaused: Boolean = false,
     val isDarkTheme: Boolean = true,
     val lastScanTimestamp: Long = 0L
 ) {
@@ -101,6 +102,8 @@ data class AppSettings(
     fun hasEmailCredentials(): Boolean =
         (senderEmail.isNotBlank() && smtpPassword.isNotBlank()) ||
             (senderEmail.isNotBlank() && gmailOAuthToken.isNotBlank())
+
+    fun canSendSilently(): Boolean = hasEmailCredentials() && !smtpAuthPaused
 }
 
 class SettingsRepository private constructor(context: Context) {
@@ -139,6 +142,7 @@ class SettingsRepository private constructor(context: Context) {
             followUpDelayDays = prefs.getInt("follow_up_days", 5),
             preferInstalledYahooApp = prefs.getBoolean("prefer_yahoo_app", false),
             connectedYahooPackage = prefs.getString("connected_yahoo_pkg", "") ?: "",
+            smtpAuthPaused = prefs.getBoolean("smtp_auth_paused", false),
             isDarkTheme = prefs.getBoolean("dark_theme", true),
             lastScanTimestamp = prefs.getLong("last_scan_ts", 0L)
         )
@@ -168,6 +172,7 @@ class SettingsRepository private constructor(context: Context) {
             putInt("follow_up_days", next.followUpDelayDays)
             putBoolean("prefer_yahoo_app", next.preferInstalledYahooApp)
             putString("connected_yahoo_pkg", next.connectedYahooPackage.trim())
+            putBoolean("smtp_auth_paused", next.smtpAuthPaused)
             putBoolean("dark_theme", next.isDarkTheme)
             putLong("last_scan_ts", next.lastScanTimestamp)
         }.apply()

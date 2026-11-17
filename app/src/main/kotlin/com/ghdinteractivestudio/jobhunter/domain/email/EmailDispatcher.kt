@@ -332,15 +332,18 @@ class EmailDispatcher(private val config: EmailConfig) {
                 val user = config.smtpUser.ifBlank { config.senderEmail }.trim()
                 val pass = config.normalizedPassword()
 
-                // Prefer AUTH PLAIN when advertised (Yahoo Mail Hermes prefers AUTH PLAIN), with automatic AUTH LOGIN fallback
                 var authenticated = false
                 if (ehloResp.contains("PLAIN", ignoreCase = true)) {
                     val plainToken = Base64.encodeToString("\u0000$user\u0000$pass".toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
                     val plainReply = sendCmd("AUTH PLAIN $plainToken")
-                    if (plainReply.startsWith("235")) {
-                        authenticated = true
-                    } else if (!plainReply.startsWith("535")) {
-                        // Continue to AUTH LOGIN fallback on non-fatal auth mechanism mismatch
+                    when {
+                        plainReply.startsWith("235") -> authenticated = true
+                        plainReply.startsWith("535") || plainReply.startsWith("534") -> {
+                            error("SMTP Error (${config.smtpHost}:$port): $plainReply")
+                        }
+                        plainReply.isBlank() -> {
+                            error("SMTP Error (${config.smtpHost}:$port): Connexion fermée après AUTH PLAIN")
+                        }
                     }
                 }
                 if (!authenticated) {
@@ -357,13 +360,15 @@ class EmailDispatcher(private val config: EmailConfig) {
             } catch (e: Throwable) {
                 runCatching { socket?.close() }
                 lastError = e
-                // Surface exact 535 reply & guidance without pointless port retries
-                if (e.message?.contains("535") == true || e.message?.contains("Authentication") == true) {
-                    val detail = e.message?.substringAfter("): ")?.trim().orEmpty()
-                    throw IllegalStateException(
-                        "Identifiants refusés ($detail). Yahoo/Gmail exige un « Mot de passe d'application » 16 car. (pas le mot de passe du compte), sinon liez l'appli Yahoo Mail ci-dessous.",
-                        e
-                    )
+                val msg = e.message.orEmpty()
+                if (msg.contains("535") || msg.contains("534") || msg.contains("AUTH005") || msg.contains("Authentication")) {
+                    val detail = msg.substringAfter("): ").trim().ifBlank { msg }
+                    val friendly = if (msg.contains("AUTH005", ignoreCase = true)) {
+                        "Yahoo bloque temporairement SMTP ($detail — trop de tentatives). Attendez 15 min ou utilisez l'envoi via l'Appli Yahoo Mail ci-dessous !"
+                    } else {
+                        "Identifiants refusés ($detail). Yahoo/Gmail exige un Mot de passe d'application à 16 lettres (pas le mot de passe normal), ou utilisez l'Appli Yahoo Mail !"
+                    }
+                    throw IllegalStateException(friendly, e)
                 }
             }
         }

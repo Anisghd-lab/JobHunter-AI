@@ -248,9 +248,9 @@ object ApplicationAutomationManager {
         var channelLabel = ""
         var resultMessage = ""
 
-        val allowAutoSend = sendSilentEmailIfConfigured && (settings.aiAutonomousEmailControl || settings.hasEmailCredentials())
+        val allowAutoSend = sendSilentEmailIfConfigured && settings.canSendSilently()
         if (targetEmail.isNotBlank()) {
-            if (allowAutoSend && settings.hasEmailCredentials()) {
+            if (allowAutoSend) {
                 val dispatcher = EmailDispatcher(buildEmailConfig(settings, migratedProfile))
                 val emailRes = dispatcher.sendApplicationEmail(
                     recipientEmail = targetEmail,
@@ -264,14 +264,35 @@ object ApplicationAutomationManager {
                     channelLabel = "Email auto envoyé à $targetEmail"
                     resultMessage = "Candidature envoyée à $targetEmail ($cvKindLabel + Lettre MLDP) !"
                 } else {
+                    val errMsg = emailRes.exceptionOrNull()?.message.orEmpty()
+                    if (errMsg.contains("535") || errMsg.contains("refusés") || errMsg.contains("AUTH005")) {
+                        com.ghdinteractivestudio.jobhunter.data.local.SettingsRepository.getInstance(context)
+                            .update { it.copy(smtpAuthPaused = true) }
+                    }
                     needsEmailIntent = true
-                    channelLabel = "Email prêt ($targetEmail) — Erreur SMTP: ${emailRes.exceptionOrNull()?.message?.take(45)}"
-                    resultMessage = "Échec SMTP (${emailRes.exceptionOrNull()?.message?.take(50)}) — ouvrez l'appli Email."
+                    channelLabel = if (settings.preferInstalledYahooApp) {
+                        "Prêt via Appli Yahoo Mail ($targetEmail)"
+                    } else {
+                        "Email prêt ($targetEmail) — Erreur SMTP"
+                    }
+                    resultMessage = if (settings.preferInstalledYahooApp) {
+                        "Dossier prêt ($cvKindLabel + Lettre MLDP) — touchez « Envoyer via Yahoo Mail » !"
+                    } else {
+                        "Échec SMTP (${errMsg.take(55)}) — ouvrez l'appli Email."
+                    }
                 }
             } else {
                 needsEmailIntent = true
-                channelLabel = "Email prêt ($targetEmail)"
-                resultMessage = "$cvKindLabel & Lettre MLDP prêts pour $targetEmail !"
+                channelLabel = if (settings.preferInstalledYahooApp) {
+                    "Prêt via Appli Yahoo Mail ($targetEmail)"
+                } else {
+                    "Email prêt ($targetEmail)"
+                }
+                resultMessage = if (settings.preferInstalledYahooApp) {
+                    "$cvKindLabel & Lettre MLDP prêts — touchez « Envoyer via Yahoo Mail » !"
+                } else {
+                    "$cvKindLabel & Lettre MLDP prêts pour $targetEmail !"
+                }
             }
         } else {
             needsWebAction = true
@@ -355,8 +376,13 @@ object ApplicationAutomationManager {
         profile: UserProfile,
         settings: AppSettings
     ): Pair<Int, String> = withContext(Dispatchers.IO) {
-        if (!settings.hasEmailCredentials() || settings.smtpPassword.isBlank()) {
-            return@withContext 0 to "SMTP/App Password requis pour le suivi autonome."
+        if (!settings.canSendSilently() || settings.smtpPassword.isBlank()) {
+            val msg = if (settings.smtpAuthPaused) {
+                "SMTP en pause (erreur 535/AUTH005) — vérifiez App Password ou utilisez Appli Yahoo Mail."
+            } else {
+                "App Password SMTP requis pour la lecture IMAP & relance silencieuse."
+            }
+            return@withContext 0 to msg
         }
         val dao = AppDatabase.getInstance(context).jobOfferDao()
         val applied = dao.getOffersByStatusOnce(JobStatus.APPLIED.name).map { it.toDomain() }
