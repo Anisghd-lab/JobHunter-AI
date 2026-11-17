@@ -39,6 +39,9 @@ interface JobOfferDao {
     @Query("DELETE FROM job_offers WHERE status = 'DETECTED'")
     suspend fun clearDetectedOffers()
 
+    @Query("DELETE FROM job_offers WHERE status = 'DETECTED' AND ((deadlineAt > 0 AND deadlineAt < :nowMillis) OR (publishedAt > 0 AND publishedAt < :minPublishedAt))")
+    suspend fun purgeExpiredDetectedOffers(nowMillis: Long, minPublishedAt: Long)
+
     @Update
     suspend fun update(offer: JobOfferEntity)
 

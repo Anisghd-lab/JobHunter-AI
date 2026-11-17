@@ -36,7 +36,10 @@ data class JobOfferEntity(
     val aiVerdict: String = "",
     val aiReasoning: String = "",
     val appliedAt: Long = 0L,
-    val appliedChannel: String = ""
+    val appliedChannel: String = "",
+    val publishedAt: Long = 0L,
+    val deadlineAt: Long = 0L,
+    val deadlineLabel: String = ""
 ) {
     fun toDomain(): JobOffer = JobOffer(
         id = id,
@@ -67,7 +70,10 @@ data class JobOfferEntity(
         aiVerdict = aiVerdict,
         aiReasoning = aiReasoning,
         appliedAt = appliedAt,
-        appliedChannel = appliedChannel
+        appliedChannel = appliedChannel,
+        publishedAt = publishedAt,
+        deadlineAt = deadlineAt,
+        deadlineLabel = deadlineLabel
     )
 
     companion object {
@@ -100,7 +106,10 @@ data class JobOfferEntity(
             aiVerdict = offer.aiVerdict,
             aiReasoning = offer.aiReasoning,
             appliedAt = offer.appliedAt,
-            appliedChannel = offer.appliedChannel
+            appliedChannel = offer.appliedChannel,
+            publishedAt = offer.publishedAt,
+            deadlineAt = offer.deadlineAt,
+            deadlineLabel = offer.deadlineLabel
         )
     }
 }

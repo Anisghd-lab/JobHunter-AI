@@ -2,6 +2,7 @@ package com.ghdinteractivestudio.jobhunter
 
 import android.app.Application
 import com.ghdinteractivestudio.jobhunter.data.local.AppDatabase
+import com.ghdinteractivestudio.jobhunter.data.local.SettingsRepository
 import com.ghdinteractivestudio.jobhunter.service.JobHunterForegroundService
 import com.ghdinteractivestudio.jobhunter.service.JobHunterScheduler
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -12,18 +13,16 @@ class JobHunterApp : Application() {
         super.onCreate()
 
         // Initialize PDFBox for native Android PDF parsing
-        try {
-            PDFBoxResourceLoader.init(this)
-        } catch (_: Exception) {
-        }
+        runCatching { PDFBoxResourceLoader.init(this) }
 
-        // Initialize Room Database eagerly
+        // Initialize Room Database & Settings
         AppDatabase.getInstance(this)
+        val settings = SettingsRepository.getInstance(this).settings.value
 
-        // Start Foreground Service 24/7
-        JobHunterForegroundService.startService(this)
-
-        // Schedule Native Periodic Wakeup (every 30 minutes via AlarmManager)
-        JobHunterScheduler.schedulePeriodicHunting(this, 30)
+        // Respect user 24/7 toggle instead of forcing restart if paused
+        if (settings.agentActive247) {
+            runCatching { JobHunterForegroundService.startService(this) }
+            JobHunterScheduler.schedulePeriodicHunting(this, 30)
+        }
     }
 }

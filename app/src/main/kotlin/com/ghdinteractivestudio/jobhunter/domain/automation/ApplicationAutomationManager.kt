@@ -10,6 +10,7 @@ import com.ghdinteractivestudio.jobhunter.data.local.AppSettings
 import com.ghdinteractivestudio.jobhunter.data.local.JobOfferEntity
 import com.ghdinteractivestudio.jobhunter.data.remote.JobScanner
 import com.ghdinteractivestudio.jobhunter.domain.ai.CvTailoringEngine
+import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
 import com.ghdinteractivestudio.jobhunter.domain.document.DocxGenerator
 import com.ghdinteractivestudio.jobhunter.domain.document.PdfGenerator
 import com.ghdinteractivestudio.jobhunter.domain.email.EmailAuthType
@@ -35,9 +36,50 @@ object ApplicationAutomationManager {
 
     private const val TAG = "JobAutomation"
 
+    private suspend fun verifyLiveOfferAndArchiveIfExpired(
+        context: Context,
+        offer: JobOffer,
+        scanner: JobScanner
+    ): Result<JobOffer> {
+        val db = AppDatabase.getInstance(context)
+        if (DeadlineParser.isExpiredOrStale(offer)) {
+            val archived = offer.copy(status = JobStatus.ARCHIVED, aiVerdict = "EXPIREE")
+            db.jobOfferDao().insertOrUpdate(JobOfferEntity.fromDomain(archived))
+            return Result.failure(IllegalStateException("Date limite dépassée (${offer.deadlineLabel.ifBlank { "offre expirée" }}) — candidature bloquée."))
+        }
+
+        val liveDetails = if (offer.url.startsWith("http")) {
+            scanner.fetchOfferLiveDetails(offer.url)
+        } else null
+
+        if (liveDetails != null && liveDetails.isExpired) {
+            val archived = offer.copy(
+                status = JobStatus.ARCHIVED,
+                aiVerdict = "EXPIREE",
+                deadlineAt = liveDetails.deadlineAt.takeIf { it > 0L } ?: offer.deadlineAt,
+                deadlineLabel = liveDetails.deadlineLabel.ifBlank { "Expirée" }
+            )
+            db.jobOfferDao().insertOrUpdate(JobOfferEntity.fromDomain(archived))
+            return Result.failure(IllegalStateException("Offre expirée sur le site (${archived.deadlineLabel}) — archivée."))
+        }
+
+        val finalEmail = offer.recruiterEmail.ifBlank { liveDetails?.recruiterEmail.orEmpty() }
+        val finalDeadlineAt = if (offer.deadlineAt > 0L) offer.deadlineAt else (liveDetails?.deadlineAt ?: 0L)
+        val finalDeadlineLabel = offer.deadlineLabel.ifBlank { liveDetails?.deadlineLabel.orEmpty() }
+
+        return Result.success(
+            offer.copy(
+                recruiterEmail = finalEmail,
+                applicationMethod = if (finalEmail.isNotBlank()) "EMAIL" else "WEBSITE",
+                deadlineAt = finalDeadlineAt,
+                deadlineLabel = finalDeadlineLabel
+            )
+        )
+    }
+
     /**
      * Step 1: Compares a real web job offer against the user's real CV using Free LLMs,
-     * also checking the offer detail URL for any hidden recruiter email address.
+     * after verifying strict deadline compliance & recruiter email availability.
      */
     suspend fun evaluateOfferWithAi(
         context: Context,
@@ -52,42 +94,35 @@ object ApplicationAutomationManager {
             )
         }
 
-        // Check detail page for email if missing
-        var enrichedEmail = offer.recruiterEmail
-        if (enrichedEmail.isBlank() && offer.url.startsWith("http")) {
-            enrichedEmail = scanner.fetchRecruiterEmailFromUrl(offer.url)
-        }
+        val verifiedOffer = verifyLiveOfferAndArchiveIfExpired(context, offer, scanner)
+            .getOrElse { return@withContext Result.failure(it) }
 
         val engine = CvTailoringEngine(settings)
-        val aiResult = engine.analyzeMatch(offer, profile)
+        val aiResult = engine.analyzeMatch(verifiedOffer, profile)
 
         val updated = aiResult.fold(
             onSuccess = { analysis ->
                 val formatReq = when (analysis.detectedFormatRequirement.uppercase()) {
                     "PDF" -> DocumentFormatRequirement.PDF
                     "DOCX" -> DocumentFormatRequirement.DOCX
-                    else -> offer.requiredFormat
+                    else -> verifiedOffer.requiredFormat
                 }
-                offer.copy(
+                verifiedOffer.copy(
                     matchScore = analysis.matchScore.coerceIn(0, 100),
-                    matchingHighlights = analysis.matchingPoints.ifEmpty { offer.matchingHighlights },
+                    matchingHighlights = analysis.matchingPoints.ifEmpty { verifiedOffer.matchingHighlights },
                     missingRequirements = analysis.missingRequirements,
                     requiredFormat = formatReq,
                     aiVerdict = analysis.verdict.ifBlank {
                         if (analysis.matchScore >= 60) "CONVIENT" else if (analysis.matchScore >= 40) "MOYEN" else "NON_ADAPTE"
                     },
                     aiReasoning = analysis.reasoning,
-                    recruiterEmail = enrichedEmail,
-                    applicationMethod = if (enrichedEmail.isNotBlank()) "EMAIL" else "WEBSITE",
-                    status = if (offer.status == JobStatus.DETECTED) JobStatus.ANALYZED else offer.status
+                    status = if (verifiedOffer.status == JobStatus.DETECTED) JobStatus.ANALYZED else verifiedOffer.status
                 )
             },
             onFailure = { err ->
                 Log.w(TAG, "AI evaluation fallback used: ${err.message}")
-                offer.copy(
-                    recruiterEmail = enrichedEmail,
-                    applicationMethod = if (enrichedEmail.isNotBlank()) "EMAIL" else "WEBSITE",
-                    status = if (offer.status == JobStatus.DETECTED) JobStatus.ANALYZED else offer.status
+                verifiedOffer.copy(
+                    status = if (verifiedOffer.status == JobStatus.DETECTED) JobStatus.ANALYZED else verifiedOffer.status
                 )
             }
         )
@@ -99,8 +134,8 @@ object ApplicationAutomationManager {
     }
 
     /**
-     * Step 2: Prepares tailored CV & Cover Letter in employer's required format (PDF or Word .docx)
-     * strictly grounded in real CV data, then dispatches via Email OR prepares for Website portal submission.
+     * Step 2: Verifies deadline, builds MLDP Cover Letter & tailored CV in employer's required format
+     * (PDF or Word .docx), then dispatches via Email OR prepares for Website portal submission.
      */
     suspend fun prepareAndApply(
         context: Context,
@@ -116,21 +151,18 @@ object ApplicationAutomationManager {
             )
         }
 
-        // Ensure email check was done
-        var targetEmail = offer.recruiterEmail
-        if (targetEmail.isBlank() && offer.url.startsWith("http")) {
-            targetEmail = scanner.fetchRecruiterEmailFromUrl(offer.url)
-        }
+        val liveOffer = verifyLiveOfferAndArchiveIfExpired(context, offer, scanner)
+            .getOrElse { return@withContext Result.failure(it) }
 
+        val targetEmail = liveOffer.recruiterEmail
         val engine = CvTailoringEngine(settings)
 
         // Run AI CV tailoring (strictly 100% faithful to real CV)
-        val tailored = engine.tailorCvContent(offer, profile).getOrNull()
+        val tailored = engine.tailorCvContent(liveOffer, profile).getOrNull()
 
-        // Generate personalized Cover Letter in exact offer language
-        val coverLetter = engine.generateCoverLetter(offer, profile).getOrElse {
-            buildDeterministicCoverLetter(offer, profile)
-        }
+        // Generate personalized Cover Letter strictly following MLDP 7-part standard
+        val mldpLetter = engine.generateMldpCoverLetter(liveOffer, profile)
+        val coverLetter = mldpLetter.toPlainText()
 
         val safeName = profile.fullName.ifBlank { "Candidat" }
             .replace(Regex("[^a-zA-Z0-9_-]"), "_")
@@ -203,7 +235,7 @@ object ApplicationAutomationManager {
         val cvHeaderTitle = "${profile.fullName.ifBlank { "CV" }} — ${tailored?.targetTitle?.ifBlank { profile.title } ?: profile.title}"
 
         // Respect Employer Demanded Format: Word (.docx) OR PDF
-        val useDocx = offer.requiredFormat == DocumentFormatRequirement.DOCX
+        val useDocx = liveOffer.requiredFormat == DocumentFormatRequirement.DOCX
 
         val cvFile = if (useDocx) {
             val f = File(outputDir, "CV_${safeName}_${uniqueSuffix}.docx")
@@ -215,15 +247,14 @@ object ApplicationAutomationManager {
             f
         }
 
-        val letterLines = coverLetter.lines()
-        val letterSections = listOf("Lettre de Motivation — ${offer.title}" to letterLines)
+        // Generate MLDP-compliant Cover Letter file (DOCX vs PDF)
         val letterFile = if (useDocx) {
             val f = File(outputDir, "Lettre_${safeCompany}_${uniqueSuffix}.docx")
-            DocxGenerator.generateDocx("Lettre de Motivation — ${offer.company}", letterSections, f)
+            DocxGenerator.generateMldpCoverLetterDocx(mldpLetter, f)
             f
         } else {
             val f = File(outputDir, "Lettre_${safeCompany}_${uniqueSuffix}.pdf")
-            PdfGenerator.generatePdf("Lettre de Motivation — ${offer.company}", letterSections, f)
+            PdfGenerator.generateMldpCoverLetterPdf(mldpLetter, f)
             f
         }
 
@@ -257,7 +288,7 @@ object ApplicationAutomationManager {
                 )
                 val emailRes = dispatcher.sendApplicationEmail(
                     recipientEmail = targetEmail,
-                    subject = "Candidature : ${offer.title} - ${profile.fullName}",
+                    subject = "${mldpLetter.subject} - ${profile.fullName}",
                     bodyText = coverLetter,
                     attachments = attachments
                 )
@@ -265,7 +296,7 @@ object ApplicationAutomationManager {
                     sentSilently = true
                     finalStatus = JobStatus.APPLIED
                     channelLabel = "Email envoyé à $targetEmail"
-                    resultMessage = "Candidature envoyée par email à $targetEmail (${if (useDocx) "DOCX" else "PDF"}) !"
+                    resultMessage = "Candidature MLDP envoyée par email à $targetEmail (${if (useDocx) "DOCX" else "PDF"}) !"
                 } else {
                     needsEmailIntent = true
                     channelLabel = "Email prêt ($targetEmail) — Échec SMTP: ${emailRes.exceptionOrNull()?.message?.take(40)}"
@@ -274,15 +305,15 @@ object ApplicationAutomationManager {
             } else {
                 needsEmailIntent = true
                 channelLabel = "Email prêt ($targetEmail)"
-                resultMessage = "CV & Lettre générés (${if (useDocx) "DOCX" else "PDF"}) pour $targetEmail !"
+                resultMessage = "CV & Lettre MLDP générés (${if (useDocx) "DOCX" else "PDF"}) pour $targetEmail !"
             }
         } else {
             needsWebAction = true
-            channelLabel = "Portail Web (${offer.sourcePlatform})"
-            resultMessage = "CV & Lettre prêts (${if (useDocx) "DOCX" else "PDF"}). Finalisez sur le site de l'offre !"
+            channelLabel = "Portail Web (${liveOffer.sourcePlatform})"
+            resultMessage = "CV & Lettre MLDP prêts (${if (useDocx) "DOCX" else "PDF"}). Finalisez sur le site de l'offre !"
         }
 
-        val updated = offer.copy(
+        val updated = liveOffer.copy(
             status = finalStatus,
             recruiterEmail = targetEmail,
             applicationMethod = if (targetEmail.isNotBlank()) "EMAIL" else "WEBSITE",
@@ -291,7 +322,7 @@ object ApplicationAutomationManager {
             letterPath = letterFile.absolutePath,
             appliedAt = if (sentSilently) now else 0L,
             appliedChannel = channelLabel,
-            aiVerdict = offer.aiVerdict.ifBlank { "CONVIENT" }
+            aiVerdict = liveOffer.aiVerdict.ifBlank { "CONVIENT" }
         )
 
         AppDatabase.getInstance(context).jobOfferDao()
@@ -364,74 +395,6 @@ object ApplicationAutomationManager {
                 setDataAndType(uri, mime)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-        }
-    }
-
-    private fun buildDeterministicCoverLetter(offer: JobOffer, profile: UserProfile): String {
-        val isFrench = listOf("responsable", "gestionnaire", "administratif", "algérie", "alger", "poste", "mission")
-            .any { "${offer.title} ${offer.description}".lowercase().contains(it) }
-
-        return if (isFrench) {
-            buildString {
-                appendLine(profile.fullName)
-                if (profile.address.isNotBlank()) appendLine(profile.address)
-                if (profile.email.isNotBlank() || profile.phone.isNotBlank()) {
-                    appendLine(listOfNotNull(profile.email.ifBlank { null }, profile.phone.ifBlank { null }).joinToString(" | "))
-                }
-                appendLine()
-                appendLine("Objet : Candidature au poste de ${offer.title} — ${offer.company}")
-                appendLine()
-                appendLine("Madame, Monsieur,")
-                appendLine()
-                appendLine("Votre annonce pour le poste de ${offer.title} au sein de ${offer.company} (${offer.location}) a retenu toute mon attention.")
-                if (profile.summary.isNotBlank()) {
-                    appendLine()
-                    appendLine(profile.summary)
-                }
-                if (profile.experiences.isNotEmpty()) {
-                    appendLine()
-                    appendLine("À travers mes expériences récentes notamment en tant que ${profile.experiences.first().title} (${profile.experiences.first().company}), j'ai développé une expertise opérationnelle en ${profile.skills.take(6).joinToString(", ")}.")
-                }
-                if (profile.languages.isNotEmpty()) {
-                    appendLine("Je maîtrise également : ${profile.languages.joinToString(", ")}.")
-                }
-                appendLine()
-                appendLine("Je serais ravi(e) d'échanger avec vous lors d'un entretien afin de vous présenter comment mes compétences peuvent contribuer aux objectifs de ${offer.company}.")
-                appendLine()
-                appendLine("Veuillez agréer, Madame, Monsieur, mes salutations distinguées.")
-                appendLine()
-                appendLine(profile.fullName)
-            }.trim()
-        } else {
-            buildString {
-                appendLine(profile.fullName)
-                if (profile.address.isNotBlank()) appendLine(profile.address)
-                if (profile.email.isNotBlank() || profile.phone.isNotBlank()) {
-                    appendLine(listOfNotNull(profile.email.ifBlank { null }, profile.phone.ifBlank { null }).joinToString(" | "))
-                }
-                appendLine()
-                appendLine("Subject: Application for ${offer.title} at ${offer.company}")
-                appendLine()
-                appendLine("Dear Hiring Manager,")
-                appendLine()
-                appendLine("I am writing to express my strong interest in the ${offer.title} position at ${offer.company} (${offer.location}).")
-                if (profile.summary.isNotBlank()) {
-                    appendLine()
-                    appendLine(profile.summary)
-                }
-                if (profile.experiences.isNotEmpty()) {
-                    appendLine()
-                    appendLine("In my experience as ${profile.experiences.first().title} at ${profile.experiences.first().company}, I honed practical strengths in ${profile.skills.take(6).joinToString(", ")}.")
-                }
-                if (profile.languages.isNotEmpty()) {
-                    appendLine("Languages: ${profile.languages.joinToString(", ")}.")
-                }
-                appendLine()
-                appendLine("Thank you for considering my application. I welcome the opportunity to discuss how my background aligns with ${offer.company}'s needs.")
-                appendLine()
-                appendLine("Sincerely,")
-                appendLine(profile.fullName)
-            }.trim()
         }
     }
 }

@@ -6,33 +6,33 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/JobHunterApp.kt": {
-    "mtime": 1794870303.0930822,
-    "seen": 1794871361.8274689,
-    "ast_hash": "07d0ecf06e2ee0d93771c468f5083621",
+    "mtime": 1794893687.8896027,
+    "seen": 1794894044.991211,
+    "ast_hash": "8fbea358e7180bc3e154f730df7fca55",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/MainActivity.kt": {
-    "mtime": 1794873165.417081,
-    "seen": 1794873264.7621467,
-    "ast_hash": "0d97c8ad88ee74261434a731fbdc90e0",
+    "mtime": 1794893990.9896026,
+    "seen": 1794894044.9912171,
+    "ast_hash": "b50c0362efbcaeb9bcbb2ba3c2cf934b",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/AppDatabase.kt": {
-    "mtime": 1794872151.7130814,
-    "seen": 1794873264.7621546,
-    "ast_hash": "3653c2579055252ce555332e60703994",
+    "mtime": 1794893082.401603,
+    "seen": 1794894044.9912202,
+    "ast_hash": "3b5babf1fb7b15c65689245791185d5c",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/JobOfferDao.kt": {
-    "mtime": 1794872161.6050816,
-    "seen": 1794873264.7621596,
-    "ast_hash": "e235d0dace908948a50161c5e2126f67",
+    "mtime": 1794893094.101603,
+    "seen": 1794894044.9912233,
+    "ast_hash": "ab94abb96691b8583a2a05e84903e85c",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/JobOfferEntity.kt": {
-    "mtime": 1794872141.8650815,
-    "seen": 1794873264.762164,
-    "ast_hash": "a7e81a8da7fc3e311c4a844bfa6435d6",
+    "mtime": 1794893068.441603,
+    "seen": 1794894044.9912262,
+    "ast_hash": "8b6d05423bdaf7f1206397a0b98f9f33",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/UserProfileDao.kt": {
@@ -48,15 +48,15 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/remote/JobScanner.kt": {
-    "mtime": 1794873107.145081,
-    "seen": 1794873264.7621822,
-    "ast_hash": "33404e2ad31cc6440a5ac84693c999b8",
+    "mtime": 1794893243.141603,
+    "seen": 1794894044.9912367,
+    "ast_hash": "4deac8de16f1c64a6f5f3f5c9c585480",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/ai/CvTailoringEngine.kt": {
-    "mtime": 1794872246.6010814,
-    "seen": 1794873264.7621863,
-    "ast_hash": "3540dd40bc348701a5d65d1a05a8279d",
+    "mtime": 1794893435.9776027,
+    "seen": 1794894044.991239,
+    "ast_hash": "a1bcbdec870186033cd13ec9b485334d",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/ai/LlmClient.kt": {
@@ -72,15 +72,15 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/document/DocxGenerator.kt": {
-    "mtime": 1794857653.759008,
-    "seen": 1794871361.8274932,
-    "ast_hash": "6285dc5d45548db7d54fc8cdb6ac4330",
+    "mtime": 1794893343.7896028,
+    "seen": 1794894044.9912512,
+    "ast_hash": "953b2a5f9eed7a6111a034003a6d7709",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/document/PdfGenerator.kt": {
-    "mtime": 1794857775.9393017,
-    "seen": 1794871361.8274949,
-    "ast_hash": "e6653cdc9b2f673931d0d4402bb8a018",
+    "mtime": 1794893317.221603,
+    "seen": 1794894044.9912584,
+    "ast_hash": "1a946fbf9753c22c0a6cbb1dab6b85af",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/email/EmailDispatcher.kt": {
@@ -90,9 +90,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/model/JobOffer.kt": {
-    "mtime": 1794872105.0090816,
-    "seen": 1794873264.762219,
-    "ast_hash": "f5e4f37264a9c80e3889ca3da000f42a",
+    "mtime": 1794893053.525603,
+    "seen": 1794894044.991263,
+    "ast_hash": "6668b22c772c14e95177d5933695d419",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/model/UserProfile.kt": {
@@ -102,15 +102,15 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/service/BootReceiver.kt": {
-    "mtime": 1794860488.605769,
-    "seen": 1794871361.827502,
-    "ast_hash": "6a5d3519045b56825956c8a3dc6915b2",
+    "mtime": 1794893690.0056026,
+    "seen": 1794894044.991267,
+    "ast_hash": "700248f3472d9631cde583ad9b7552d8",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/service/JobHunterForegroundService.kt": {
-    "mtime": 1794872358.7850814,
-    "seen": 1794873264.7622297,
-    "ast_hash": "2d906eb845ddf0973f1d9e22baf106d2",
+    "mtime": 1794893729.0136027,
+    "seen": 1794894044.991269,
+    "ast_hash": "faad6bf84a20c5cfc1d44e6c542f03c4",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/service/JobHunterScheduler.kt": {
@@ -132,9 +132,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/screens/AgentScreen.kt": {
-    "mtime": 1794872593.6330812,
-    "seen": 1794873264.762244,
-    "ast_hash": "076a675696542302715ec48579c7d5d9",
+    "mtime": 1794893771.7576027,
+    "seen": 1794894044.9912767,
+    "ast_hash": "13563a912568d8e4b9fea24ca05926cf",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/screens/CvScreen.kt": {
@@ -144,15 +144,15 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/screens/PipelineScreen.kt": {
-    "mtime": 1794872454.9250813,
-    "seen": 1794873264.762252,
-    "ast_hash": "b7de6daa9c4c30d7d787f8ee81bbf638",
+    "mtime": 1794893876.2776027,
+    "seen": 1794894044.9912808,
+    "ast_hash": "8785021117c9040820f43bfbb690d5a4",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/screens/RadarScreen.kt": {
-    "mtime": 1794872400.7050815,
-    "seen": 1794873264.7622557,
-    "ast_hash": "1cb9d29a09394de873b1da65967bd0ea",
+    "mtime": 1794893815.8976026,
+    "seen": 1794894044.9912827,
+    "ast_hash": "247ed53e0297a2186a21b7bb0ae3b287",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/theme/Motion.kt": {
@@ -174,9 +174,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/theme/Theme.kt": {
-    "mtime": 1794862863.4431005,
-    "seen": 1794871361.8275242,
-    "ast_hash": "008b1a758d42e92430eb5927a9e11cee",
+    "mtime": 1794893691.5696027,
+    "seen": 1794894044.9912896,
+    "ast_hash": "f33834490448372f2a4f46c37d0d1fe6",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/theme/Type.kt": {
@@ -204,117 +204,189 @@
     "semantic_hash": ""
   },
   "PROJECT_STATE.md": {
-    "mtime": 1794872848.269081,
-    "seen": 1794873264.7622855,
-    "ast_hash": "f7c0fa3c46eff1805eb3c3c572c05069",
+    "mtime": 1794894010.5256026,
+    "seen": 1794894044.9912987,
+    "ast_hash": "ddd08f2c526f8c97148a419b2317d9bf",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-hdpi/ic_launcher.png": {
-    "mtime": 1794856510.8472111,
-    "seen": 1794871361.8275354,
-    "ast_hash": "f19d870550a9d03b54b5604c5f4baca8",
+    "mtime": 1794874137.9690807,
+    "seen": 1794894044.9913006,
+    "ast_hash": "4f67371568de985d9e54f32c4a850766",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png": {
-    "mtime": 1794856510.8432112,
-    "seen": 1794871361.827537,
-    "ast_hash": "bb8a8a60c76af39c0dda65f24f61b0e0",
+    "mtime": 1794874137.8010807,
+    "seen": 1794894044.9913046,
+    "ast_hash": "365755886dc39c417d191bd6e16d9302",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-hdpi/ic_launcher_round.png": {
-    "mtime": 1794856510.8552113,
-    "seen": 1794871361.827539,
-    "ast_hash": "027f74dc1775ccc4470bbfac0fa747fe",
+    "mtime": 1794874137.9770808,
+    "seen": 1794894044.9913092,
+    "ast_hash": "513df79555bf1b985a77799fe07ea114",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-mdpi/ic_launcher.png": {
-    "mtime": 1794856510.8912113,
-    "seen": 1794871361.8275409,
-    "ast_hash": "f4f73c1c63becf30cd5c57a3dc335f33",
+    "mtime": 1794874137.9530807,
+    "seen": 1794894044.991311,
+    "ast_hash": "58bc3426421b404c21e9f229cd6082ba",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png": {
-    "mtime": 1794856510.871211,
-    "seen": 1794871361.8275433,
-    "ast_hash": "402e511006a05783f79cb69f76e12e4e",
+    "mtime": 1794874137.7690806,
+    "seen": 1794894044.9913154,
+    "ast_hash": "ffa9e2b20f19b1247504df8a0642adab",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-mdpi/ic_launcher_round.png": {
-    "mtime": 1794856510.8832111,
-    "seen": 1794871361.8275452,
-    "ast_hash": "328903ee310b1e01f9750b13ae3d0eb1",
+    "mtime": 1794874137.9610808,
+    "seen": 1794894044.9913192,
+    "ast_hash": "f32737b4c1cbc70590c25e0f5134691f",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-xhdpi/ic_launcher.png": {
-    "mtime": 1794856510.907211,
-    "seen": 1794871361.8275466,
-    "ast_hash": "52e787d20d67ea53ed121e3eb0b35c1e",
+    "mtime": 1794874137.9850807,
+    "seen": 1794894044.9913213,
+    "ast_hash": "773a770102f2f629950913c6df4618e8",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png": {
-    "mtime": 1794856510.9112113,
-    "seen": 1794871361.8275487,
-    "ast_hash": "01492c1fde605495d48761577a5a21bd",
+    "mtime": 1794874137.8330808,
+    "seen": 1794894044.991325,
+    "ast_hash": "e50077037f4e81b212252ff73a07c80d",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-xhdpi/ic_launcher_round.png": {
-    "mtime": 1794856510.903211,
-    "seen": 1794871361.8275518,
-    "ast_hash": "73cd0aa7bc64782487e147e674031d03",
+    "mtime": 1794874137.9930806,
+    "seen": 1794894044.9913287,
+    "ast_hash": "9d9b5bac81f3bfdec719938ac7ad01ce",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-xxhdpi/ic_launcher.png": {
-    "mtime": 1794856510.9312112,
-    "seen": 1794871361.8275537,
-    "ast_hash": "105a7eec24e3fb38e5756e2fe3f2741f",
+    "mtime": 1794874138.0050807,
+    "seen": 1794894044.9913309,
+    "ast_hash": "b3dd55da740355808500ee5c533aa4e4",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png": {
-    "mtime": 1794856510.9352112,
-    "seen": 1794871361.827556,
-    "ast_hash": "8289d13e097017ce831689859be2a980",
+    "mtime": 1794874137.8690808,
+    "seen": 1794894044.9913344,
+    "ast_hash": "ab37c6af9c3dd7f8d63591a0280cc7ba",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png": {
-    "mtime": 1794856510.9392111,
-    "seen": 1794871361.827558,
-    "ast_hash": "dd7658e65e1e8fdc69d8ff4d7f7e81bd",
+    "mtime": 1794874138.0170808,
+    "seen": 1794894044.9913385,
+    "ast_hash": "6b4924a2a13d113c4e1713bac536a54a",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-xxxhdpi/ic_launcher.png": {
-    "mtime": 1794856510.9512112,
-    "seen": 1794871361.82756,
-    "ast_hash": "2296f6d853856c17819f2bf24c9c3e1c",
+    "mtime": 1794874138.0290806,
+    "seen": 1794894044.9913406,
+    "ast_hash": "a6c9ddbde8f9b43fa340f1d33626a1a8",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png": {
-    "mtime": 1794856510.959211,
-    "seen": 1794871361.827562,
-    "ast_hash": "55b3f38475c02fe3fd10c020650d1c95",
+    "mtime": 1794874137.9250808,
+    "seen": 1794894044.9913445,
+    "ast_hash": "3b7c7a73ee87876a1c4ca6e974033f0a",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png": {
-    "mtime": 1794856510.963211,
-    "seen": 1794871361.8275783,
-    "ast_hash": "aede78bac54dcc632630bc449a2b8f5a",
+    "mtime": 1794874138.0410807,
+    "seen": 1794894044.9913483,
+    "ast_hash": "c85d65871df4b1b3d399f316c056f3cc",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/local/SettingsRepository.kt": {
-    "mtime": 1794872059.8610816,
-    "seen": 1794873264.7621691,
-    "ast_hash": "efa1be8488bd71063c369e4e1fbc608a",
+    "mtime": 1794893629.4616027,
+    "seen": 1794894044.9912295,
+    "ast_hash": "26e9b4daf6d359d0d8681e361053adff",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/automation/ApplicationAutomationManager.kt": {
-    "mtime": 1794872338.3570814,
-    "seen": 1794873264.7621944,
-    "ast_hash": "4fbdc0763e30a643895f6c650b0fa2a7",
+    "mtime": 1794893582.1136026,
+    "seen": 1794894044.991244,
+    "ast_hash": "7ae128b572ac37918ccdf14296b1c632",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/document/HtmlSanitizer.kt": {
     "mtime": 1794873077.905081,
     "seen": 1794873264.762207,
     "ast_hash": "236713bc593fe0dc4246f40e3012eb85",
+    "semantic_hash": ""
+  },
+  "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/document/DeadlineParser.kt": {
+    "mtime": 1794893039.3736029,
+    "seen": 1794894044.9912484,
+    "ast_hash": "29f72e489832fc5ba7082dbb9913a292",
+    "semantic_hash": ""
+  },
+  "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/document/MldpCoverLetter.kt": {
+    "mtime": 1794893286.557603,
+    "seen": 1794894044.991256,
+    "ast_hash": "9ed28b0df53875cf08231bf7b3091268",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-hdpi/ic_launcher_background.png": {
+    "mtime": 1794874137.8090808,
+    "seen": 1794894044.9913027,
+    "ast_hash": "742dede22782b0208b660d8ed260ace0",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-hdpi/ic_launcher_monochrome.png": {
+    "mtime": 1794874137.8170807,
+    "seen": 1794894044.9913065,
+    "ast_hash": "fd7db2a1e258c7850cc7fa34bac00fe8",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-mdpi/ic_launcher_background.png": {
+    "mtime": 1794874137.7810807,
+    "seen": 1794894044.991313,
+    "ast_hash": "73f7f735bfbbadff55c329903cfa823d",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-mdpi/ic_launcher_monochrome.png": {
+    "mtime": 1794874137.7890806,
+    "seen": 1794894044.9913173,
+    "ast_hash": "2f3141183a89693d3ced80eb9d604236",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-xhdpi/ic_launcher_background.png": {
+    "mtime": 1794874137.8410807,
+    "seen": 1794894044.9913232,
+    "ast_hash": "1e1ea0737968849251c51d61d0e06b6d",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-xhdpi/ic_launcher_monochrome.png": {
+    "mtime": 1794874137.8530807,
+    "seen": 1794894044.9913268,
+    "ast_hash": "9ccdce814b28b2925b251c3cf12f012c",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-xxhdpi/ic_launcher_background.png": {
+    "mtime": 1794874137.8890808,
+    "seen": 1794894044.9913325,
+    "ast_hash": "df1d09bf6bcb61e28dd128890e75d254",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-xxhdpi/ic_launcher_monochrome.png": {
+    "mtime": 1794874137.9050808,
+    "seen": 1794894044.991336,
+    "ast_hash": "c8e12ea73a8db0ac6b56a289960dd8e5",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-xxxhdpi/ic_launcher_background.png": {
+    "mtime": 1794874137.9370806,
+    "seen": 1794894044.9913425,
+    "ast_hash": "01d71deddc4e5e6088b01f94ae24a84f",
+    "semantic_hash": ""
+  },
+  "app/src/main/res/mipmap-xxxhdpi/ic_launcher_monochrome.png": {
+    "mtime": 1794874137.9490807,
+    "seen": 1794894044.9913461,
+    "ast_hash": "e6460a2881a34d4806418968c32542b7",
     "semantic_hash": ""
   }
 }

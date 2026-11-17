@@ -18,6 +18,7 @@ import com.ghdinteractivestudio.jobhunter.data.local.JobOfferEntity
 import com.ghdinteractivestudio.jobhunter.data.local.SettingsRepository
 import com.ghdinteractivestudio.jobhunter.data.remote.JobScanner
 import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomationManager
+import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
 import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -91,19 +92,31 @@ class JobHunterForegroundService : Service() {
 
             while (isActive) {
                 runCatching {
+                    val now = System.currentTimeMillis()
+                    val minPublishedAt = now - (DeadlineParser.DEFAULT_MAX_OFFER_AGE_DAYS * 86_400_000L)
+                    dao.purgeExpiredDetectedOffers(now, minPublishedAt)
+
                     val profile = profileDao.getProfile()?.toDomain()
                     val settings = settingsRepo.settings.value
 
-                    val newOffers = scanner.scanOffers(profile)
-                    if (newOffers.isNotEmpty()) {
-                        dao.clearDetectedOffers()
-                        dao.insertAll(newOffers.map { JobOfferEntity.fromDomain(it) })
+                    // Skip redundant scan if freshly scanned within the last 3 minutes
+                    val shouldScan = (now - settings.lastScanTimestamp) >= 3 * 60_000L
+                    val newOffers = if (shouldScan) {
+                        val scanned = scanner.scanOffers(profile)
+                        if (scanned.isNotEmpty()) {
+                            dao.clearDetectedOffers()
+                            dao.insertAll(scanned.map { JobOfferEntity.fromDomain(it) })
+                            settingsRepo.update { it.copy(lastScanTimestamp = System.currentTimeMillis()) }
+                        }
+                        scanned
+                    } else {
+                        emptyList()
                     }
 
-                    // Autonomous AI comparison + Cover Letter & Application Automation when CV is loaded
+                    // Autonomous AI comparison + MLDP Cover Letter & Application Automation when CV is loaded
                     var autoProcessedCount = 0
-                    if (profile != null && profile.rawCvContent.isNotBlank() && settings.hasAnyAiKey()) {
-                        val candidates = newOffers.take(3)
+                    if (newOffers.isNotEmpty() && profile != null && profile.rawCvContent.isNotBlank() && settings.hasAnyAiKey()) {
+                        val candidates = newOffers.filter { !DeadlineParser.isExpiredOrStale(it) }.take(3)
                         for (candidate in candidates) {
                             val existing = dao.getOfferById(candidate.id)
                             if (existing != null && existing.status != JobStatus.DETECTED.name) continue
@@ -117,7 +130,10 @@ class JobHunterForegroundService : Service() {
                             )
                             val evaluated = evalRes.getOrNull() ?: continue
 
-                            if (settings.autoApplyEnabled && evaluated.matchScore >= settings.autoApplyMinScore) {
+                            if (settings.autoApplyEnabled &&
+                                evaluated.matchScore >= settings.autoApplyMinScore &&
+                                !DeadlineParser.isExpiredOrStale(evaluated)
+                            ) {
                                 ApplicationAutomationManager.prepareAndApply(
                                     context = applicationContext,
                                     offer = evaluated,
@@ -131,12 +147,14 @@ class JobHunterForegroundService : Service() {
                         }
                     }
 
-                    val msg = if (autoProcessedCount > 0) {
-                        "${newOffers.size} offres réelles · $autoProcessedCount dossier(s) automatisé(s)"
-                    } else {
-                        "${newOffers.size} offres réelles (DZ & Monde) · Score calculé"
+                    if (newOffers.isNotEmpty()) {
+                        val msg = if (autoProcessedCount > 0) {
+                            "${newOffers.size} offres actives · $autoProcessedCount dossier(s) automatisé(s)"
+                        } else {
+                            "${newOffers.size} offres actives (DZ & Monde) · Délais vérifiés"
+                        }
+                        updateNotification("Veille 24/7 Active", msg)
                     }
-                    updateNotification("Veille 24/7 Active", msg)
                 }.onFailure { err ->
                     Log.e(TAG, "Hunting loop error: ${err.message}", err)
                 }

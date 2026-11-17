@@ -48,5 +48,8 @@ data class JobOffer(
     val aiVerdict: String = "", // "CONVIENT", "MOYEN", "NON_ADAPTE"
     val aiReasoning: String = "",
     val appliedAt: Long = 0L,
-    val appliedChannel: String = ""
+    val appliedChannel: String = "",
+    val publishedAt: Long = 0L,
+    val deadlineAt: Long = 0L,
+    val deadlineLabel: String = ""
 )

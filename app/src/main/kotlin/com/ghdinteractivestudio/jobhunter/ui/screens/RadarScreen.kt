@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Business
@@ -39,8 +40,8 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -64,8 +65,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomationManager
 import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationOutcome
+import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
 import com.ghdinteractivestudio.jobhunter.domain.model.DocumentFormatRequirement
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
+import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
 import com.ghdinteractivestudio.jobhunter.ui.components.GlassStyle
 import com.ghdinteractivestudio.jobhunter.ui.components.glass
 import com.ghdinteractivestudio.jobhunter.ui.components.glassCard
@@ -94,10 +97,15 @@ fun RadarScreen(
     onApplyClick: (JobOffer) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val offers by offersFlow.collectAsState()
+    val rawOffers by offersFlow.collectAsState()
     val context = LocalContext.current
     var selectedFilter by remember { mutableStateOf("ALL") } // ALL, ALGERIA, INTERNATIONAL, REMOTE, ONSITE
     var searchQuery by remember { mutableStateOf("") }
+
+    // Enforce strict deadline compliance: exclude expired / archived offers from Radar
+    val offers = remember(rawOffers) {
+        rawOffers.filter { it.status != JobStatus.ARCHIVED && !DeadlineParser.isExpiredOrStale(it) }
+    }
 
     val filteredOffers = remember(offers, selectedFilter, searchQuery) {
         offers.filter { offer ->
@@ -436,6 +444,24 @@ fun JobOfferCard(
                 )
             }
 
+            if (offer.deadlineAt > 0L) {
+                Spacer(Modifier.height(5.dp))
+                val remLabel = DeadlineParser.formatDaysRemaining(offer.deadlineAt)
+                val urgent = (offer.deadlineAt - System.currentTimeMillis()) <= 7L * 86_400_000L
+                val dlColor = if (urgent) Palette.attention else Palette.emeraldAccent
+                Row(
+                    modifier = Modifier
+                        .background(dlColor.copy(alpha = 0.14f), Capsule())
+                        .border(0.5.dp, dlColor.copy(alpha = 0.4f), Capsule())
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Schedule, contentDescription = null, tint = dlColor, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(text = remLabel, style = Type.label.bold, color = dlColor)
+                }
+            }
+
             // Real Web Tags Flow
             if (offer.tags.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
@@ -601,7 +627,7 @@ fun JobOfferCard(
                     if (isBusy) {
                         CircularProgressIndicator(color = Color.White, modifier = Modifier.size(15.dp), strokeWidth = 2.dp)
                     } else {
-                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.width(4.dp))
                         Text(
                             text = if (offer.recruiterEmail.isNotBlank()) "Postuler Email" else "Postuler / Préparer",

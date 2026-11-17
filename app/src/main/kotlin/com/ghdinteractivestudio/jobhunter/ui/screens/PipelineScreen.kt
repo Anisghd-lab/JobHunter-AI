@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -28,7 +29,6 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.OpenInBrowser
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomationManager
+import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
 import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
 import com.ghdinteractivestudio.jobhunter.ui.components.glassCard
@@ -71,8 +72,8 @@ fun PipelineScreen(
 ) {
     val allOffers by allOffersFlow.collectAsState()
 
-    // Strictly track REAL analyzed, ready, applied, interview or rejected candidatures (NEVER raw radar scan noise)
-    val trackedApps = allOffers.filter { it.status != JobStatus.DETECTED }
+    // Strictly track REAL analyzed, ready, applied, interview or rejected candidatures (NEVER raw radar scan or archived noise)
+    val trackedApps = allOffers.filter { it.status != JobStatus.DETECTED && it.status != JobStatus.ARCHIVED }
 
     val totalApplied = trackedApps.count { it.status == JobStatus.APPLIED }
     val totalInterview = trackedApps.count { it.status == JobStatus.INTERVIEW }
@@ -414,6 +415,15 @@ fun ApplicationTrackingCard(
             Spacer(Modifier.height(8.dp))
 
             // Pipeline Action Buttons
+            val isExpired = DeadlineParser.isExpiredOrStale(app)
+            if (app.deadlineAt > 0L) {
+                Text(
+                    text = if (isExpired) "⛔ Date limite dépassée (${app.deadlineLabel})" else "⏰ ${DeadlineParser.formatDaysRemaining(app.deadlineAt)}",
+                    style = Type.label.bold,
+                    color = if (isExpired) Color(0xFFF87171) else Palette.attention
+                )
+                Spacer(Modifier.height(6.dp))
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -421,14 +431,15 @@ fun ApplicationTrackingCard(
                 if (app.status == JobStatus.ANALYZED || app.status == JobStatus.READY_TO_SEND) {
                     Button(
                         onClick = onDispatchClick,
+                        enabled = !isExpired,
                         shape = Capsule(),
                         colors = ButtonDefaults.buttonColors(containerColor = Palette.emeraldAccent, contentColor = Color.White),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = if (app.status == JobStatus.ANALYZED) "Générer & Postuler" else "Envoyer / Ouvrir",
+                            text = if (isExpired) "Expirée" else if (app.status == JobStatus.ANALYZED) "Générer & Postuler" else "Envoyer / Ouvrir",
                             style = Type.label.bold
                         )
                     }

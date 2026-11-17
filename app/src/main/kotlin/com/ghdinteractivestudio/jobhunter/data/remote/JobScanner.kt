@@ -1,6 +1,7 @@
 package com.ghdinteractivestudio.jobhunter.data.remote
 
 import android.util.Log
+import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
 import com.ghdinteractivestudio.jobhunter.domain.document.HtmlSanitizer
 import com.ghdinteractivestudio.jobhunter.domain.model.DocumentFormatRequirement
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
@@ -23,12 +24,19 @@ import java.net.URLEncoder
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
+data class LiveOfferDetails(
+    val recruiterEmail: String = "",
+    val isExpired: Boolean = false,
+    val deadlineAt: Long = 0L,
+    val deadlineLabel: String = ""
+)
+
 /**
  * 100% REAL Multi-Source Live Job Scanner :
  * - National Algérie (Présentiel / Hybride / Remote DZ) via Emploitic DZ
  * - International (Worldwide Remote & Présentiel / Visa) via Arbeitnow, Remotive, Jobicy, Himalayas, RemoteOK, WeWorkRemotely
+ * - Strict Deadline & Expiry enforcement via DeadlineParser (excludes expired/closed jobs automatically)
  * - All descriptions sanitized via HtmlSanitizer (ZERO unreadable HTML/markup)
- * - ZERO fabricated or hardcoded fake job offers
  */
 class JobScanner {
 
@@ -106,40 +114,68 @@ class JobScanner {
             Log.w(TAG, "WWR error: ${it.message}")
         }
 
-        // Deduplicate by URL/ID and compute deterministic CV relevance score (no fabrication)
+        // Deduplicate, enforce strict active deadline & age compliance, and score deterministically
+        val now = System.currentTimeMillis()
         val distinct = allOffers
-            .filter { it.title.isNotBlank() && it.url.startsWith("http") && it.description.length >= 25 }
+            .filter {
+                it.title.isNotBlank() &&
+                    it.url.startsWith("http") &&
+                    it.description.length >= 25 &&
+                    !DeadlineParser.isExpiredOrStale(it, nowMillis = now)
+            }
             .distinctBy { it.url.ifBlank { it.id } }
             .map { offer ->
                 scoreWithCvDeterministically(offer, profile)
             }
-            .sortedWith(compareByDescending<JobOffer> { it.matchScore }.thenByDescending { it.detectedAt })
+            .sortedWith(compareByDescending<JobOffer> { it.matchScore }.thenByDescending { it.publishedAt }.thenByDescending { it.detectedAt })
 
-        Log.d(TAG, "Scan complete. Total real cleaned offers collected: ${distinct.size}")
+        Log.d(TAG, "Scan complete. Total active non-expired real offers collected: ${distinct.size}")
         distinct
     }
 
     /**
-     * Fetches the full detail web page of a job offer to extract an actual recruiter email
-     * if the summary API didn't expose it, plus clean readable detail text.
+     * Fetches the live offer detail page to verify it is NOT expired (404/410, validThrough, or "Offre expirée"),
+     * parse any detail-only deadline, and extract any recruiter contact email.
      */
-    suspend fun fetchRecruiterEmailFromUrl(url: String): String = withContext(Dispatchers.IO) {
-        if (!url.startsWith("http")) return@withContext ""
+    suspend fun fetchOfferLiveDetails(url: String): LiveOfferDetails = withContext(Dispatchers.IO) {
+        if (!url.startsWith("http")) return@withContext LiveOfferDetails()
         runCatching {
             val req = Request.Builder().url(url).header("User-Agent", UA).build()
             httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@use ""
-                val html = resp.body?.string() ?: return@use ""
-                // Check explicit mailto: links first
-                val mailto = Regex("""mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})""", RegexOption.IGNORE_CASE)
+                if (resp.code == 404 || resp.code == 410) {
+                    return@use LiveOfferDetails(isExpired = true, deadlineLabel = "Expirée (HTTP ${resp.code})")
+                }
+                if (!resp.isSuccessful) return@use LiveOfferDetails()
+
+                val html = resp.body?.string() ?: return@use LiveOfferDetails()
+
+                // Check JSON-LD "validThrough"
+                val validThroughRaw = Regex(""""validThrough"\s*:\s*"([^"]+)"""", RegexOption.IGNORE_CASE)
                     .find(html)?.groupValues?.getOrNull(1)
-                if (!mailto.isNullOrBlank()) return@use mailto
+                val validThroughMs = DeadlineParser.parseTimestamp(validThroughRaw)
 
                 val cleanText = HtmlSanitizer.cleanToReadableText(html)
-                HtmlSanitizer.extractRecruiterEmail(cleanText)
+                val dl = DeadlineParser.extractDeadline(
+                    cleanText = cleanText,
+                    explicitExpiryMillis = validThroughMs
+                )
+
+                val mailto = Regex("""mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})""", RegexOption.IGNORE_CASE)
+                    .find(html)?.groupValues?.getOrNull(1)
+                val email = mailto?.takeIf { it.isNotBlank() } ?: HtmlSanitizer.extractRecruiterEmail(cleanText)
+
+                LiveOfferDetails(
+                    recruiterEmail = email,
+                    isExpired = dl.isExpired,
+                    deadlineAt = dl.deadlineAt,
+                    deadlineLabel = dl.deadlineLabel
+                )
             }
-        }.getOrDefault("")
+        }.getOrDefault(LiveOfferDetails())
     }
+
+    suspend fun fetchRecruiterEmailFromUrl(url: String): String =
+        fetchOfferLiveDetails(url).recruiterEmail
 
     private fun deriveAlgeriaQueries(profile: UserProfile?): List<String> {
         if (profile == null || profile.rawCvContent.isBlank()) {
@@ -269,7 +305,8 @@ class JobScanner {
                 }
 
                 val recruiterEmail = HtmlSanitizer.extractRecruiterEmail(cleanDesc)
-                val publishedAt = obj.str("publishedAt").take(10)
+                val rawPubAt = obj.str("publishedAt")
+                val publishedAt = rawPubAt.take(10)
 
                 val tags = buildList {
                     add("🇩🇿 Algérie")
@@ -298,7 +335,7 @@ class JobScanner {
                         workMode = workModeLabel,
                         applicationMethod = if (recruiterEmail.isNotBlank()) "EMAIL" else "WEBSITE",
                         publishedDate = publishedAt
-                    )
+                    ).withDeadlineCheck(rawPublished = rawPubAt)
                 )
             }
         }
@@ -342,6 +379,7 @@ class JobScanner {
                     addAll(apiTags.take(3))
                 }.distinct()
 
+                val rawCreated = obj.str("created_at")
                 offers.add(
                     JobOffer(
                         id = "arbeitnow_${slug.ifBlank { UUID.randomUUID().toString() }}",
@@ -360,7 +398,7 @@ class JobScanner {
                         regionScope = "INTERNATIONAL",
                         workMode = if (isRemote) "REMOTE" else "ONSITE",
                         applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE"
-                    )
+                    ).withDeadlineCheck(rawPublished = rawCreated)
                 )
             }
         }
@@ -389,7 +427,8 @@ class JobScanner {
                 val category = obj.str("category")
                 val location = obj.str("candidate_required_location").ifBlank { "Worldwide Remote" }
                 val salary = obj.str("salary")
-                val pubDate = obj.str("publication_date").take(10)
+                val rawPubDate = obj.str("publication_date")
+                val pubDate = rawPubDate.take(10)
                 val jobType = obj.str("job_type").replace("_", " ").ifBlank { "Full-time" }
                 val apiTags = obj["tags"]?.takeIf { it is JsonArray }?.jsonArray
                     ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim() } ?: emptyList()
@@ -424,7 +463,7 @@ class JobScanner {
                         applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE",
                         salary = salary,
                         publishedDate = pubDate
-                    )
+                    ).withDeadlineCheck(rawPublished = rawPubDate)
                 )
             }
         }
@@ -452,7 +491,8 @@ class JobScanner {
                 val cleanDesc = HtmlSanitizer.cleanToReadableText(rawDesc)
                 val url = obj.str("url")
                 val geo = obj.str("jobGeo").ifBlank { "Worldwide" }
-                val pubDate = obj.str("pubDate").take(10)
+                val rawPubDate = obj.str("pubDate")
+                val pubDate = rawPubDate.take(10)
                 val industries = obj["jobIndustry"]?.takeIf { it is JsonArray }?.jsonArray
                     ?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
                 val jobTypes = obj["jobType"]?.takeIf { it is JsonArray }?.jsonArray
@@ -486,7 +526,7 @@ class JobScanner {
                         workMode = "REMOTE",
                         applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE",
                         publishedDate = pubDate
-                    )
+                    ).withDeadlineCheck(rawPublished = rawPubDate)
                 )
             }
         }
@@ -532,6 +572,9 @@ class JobScanner {
                     addAll(seniorities.take(1))
                 }.distinct()
 
+                val rawPubDate = obj.str("pubDate")
+                val expiryMs = DeadlineParser.parseTimestamp(obj.str("expiryDate"))
+
                 offers.add(
                     JobOffer(
                         id = "himalayas_${url.hashCode()}",
@@ -550,7 +593,7 @@ class JobScanner {
                         regionScope = "INTERNATIONAL",
                         workMode = "REMOTE",
                         applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE"
-                    )
+                    ).withDeadlineCheck(rawPublished = rawPubDate, explicitExpiryMillis = expiryMs)
                 )
             }
         }
@@ -583,6 +626,7 @@ class JobScanner {
 
                 val id = obj.str("id").ifBlank { UUID.randomUUID().toString() }
                 val email = HtmlSanitizer.extractRecruiterEmail(cleanDesc)
+                val rawDate = obj.str("date").ifBlank { obj.str("epoch") }
 
                 offers.add(
                     JobOffer(
@@ -601,8 +645,9 @@ class JobScanner {
                         tags = (listOf("🌍 Remote") + apiTags.take(4)).distinct(),
                         regionScope = "INTERNATIONAL",
                         workMode = "REMOTE",
-                        applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE"
-                    )
+                        applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE",
+                        publishedDate = obj.str("date").take(10)
+                    ).withDeadlineCheck(rawPublished = rawDate)
                 )
             }
         }
@@ -626,6 +671,7 @@ class JobScanner {
             val linkRegex = Regex("<link>(.*?)</link>")
             val catRegex = Regex("<category>(.*?)</category>")
             val regionRegex = Regex("<region>(.*?)</region>")
+            val pubRegex = Regex("<pubDate>(.*?)</pubDate>")
 
             for (itemMatch in itemRegex.findAll(xml).take(35)) {
                 val itemContent = itemMatch.groupValues[1]
@@ -634,6 +680,7 @@ class JobScanner {
                 val link = linkRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: ""
                 val category = catRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: ""
                 val region = regionRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: "Anywhere"
+                val rawPubDate = pubRegex.find(itemContent)?.groupValues?.get(1)?.trim() ?: ""
 
                 val parts = HtmlSanitizer.cleanToReadableText(rawTitle).split(":", limit = 2)
                 val company = if (parts.size > 1) parts[0].trim() else "Remote Company"
@@ -662,7 +709,7 @@ class JobScanner {
                         regionScope = "INTERNATIONAL",
                         workMode = "REMOTE",
                         applicationMethod = if (email.isNotBlank()) "EMAIL" else "WEBSITE"
-                    )
+                    ).withDeadlineCheck(rawPublished = rawPubDate)
                 )
             }
         }
@@ -769,6 +816,30 @@ class JobScanner {
             lower.contains("format pdf") || lower.contains("au format pdf") || lower.contains("pdf format") -> DocumentFormatRequirement.PDF
             else -> DocumentFormatRequirement.ANY
         }
+    }
+
+    private fun JobOffer.withDeadlineCheck(
+        rawPublished: String = "",
+        explicitExpiryMillis: Long = 0L
+    ): JobOffer {
+        val pubMs = DeadlineParser.parseTimestamp(rawPublished)
+        val dl = DeadlineParser.extractDeadline(
+            cleanText = description,
+            publishedAtMillis = pubMs,
+            explicitExpiryMillis = explicitExpiryMillis
+        )
+        val finalPubDate = publishedDate.ifBlank {
+            if (pubMs > 0L) {
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                    .format(java.util.Date(pubMs))
+            } else ""
+        }
+        return copy(
+            publishedAt = pubMs,
+            publishedDate = finalPubDate,
+            deadlineAt = dl.deadlineAt,
+            deadlineLabel = dl.deadlineLabel
+        )
     }
 
     private fun JsonObject.str(key: String): String {

@@ -10,13 +10,13 @@ import java.io.FileOutputStream
 
 /**
  * Native Android PDF Generator :
- * Creates clean, ATS-compliant, high-resolution vector PDF documents.
+ * Creates clean, ATS-compliant high-resolution vector PDFs and exact MLDP-formatted Cover Letters.
  */
 object PdfGenerator {
 
     private const val PAGE_WIDTH = 595 // A4 standard width at 72dpi
     private const val PAGE_HEIGHT = 842 // A4 standard height at 72dpi
-    private const val MARGIN = 40f
+    private const val MARGIN = 44f
 
     fun generatePdf(
         title: String,
@@ -31,14 +31,14 @@ object PdfGenerator {
 
         val titlePaint = Paint().apply {
             color = Color.rgb(17, 24, 39)
-            textSize = 20f
+            textSize = 18f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             isAntiAlias = true
         }
 
         val sectionPaint = Paint().apply {
-            color = Color.rgb(16, 185, 129) // Emerald accent
-            textSize = 14f
+            color = Color.rgb(5, 150, 105)
+            textSize = 13f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             isAntiAlias = true
         }
@@ -55,24 +55,31 @@ object PdfGenerator {
             strokeWidth = 1f
         }
 
-        var currentY = MARGIN + 25f
+        var currentY = MARGIN + 18f
+        val maxContentWidth = PAGE_WIDTH - 2 * MARGIN
 
-        // Document Title
-        canvas.drawText(title, MARGIN, currentY, titlePaint)
-        currentY += 15f
-        canvas.drawLine(MARGIN, currentY, PAGE_WIDTH - MARGIN, currentY, linePaint)
-        currentY += 25f
-
-        for ((sectionTitle, paragraphs) in sections) {
-            // Check page overflow
-            if (currentY > PAGE_HEIGHT - MARGIN - 60f) {
+        fun ensureSpace(neededHeight: Float) {
+            if (currentY + neededHeight > PAGE_HEIGHT - MARGIN) {
                 document.finishPage(page)
                 pageNumber++
                 pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
                 page = document.startPage(pageInfo)
                 canvas = page.canvas
-                currentY = MARGIN + 20f
+                currentY = MARGIN + 18f
             }
+        }
+
+        // Document Title with proper line wrapping (no horizontal overflow!)
+        val wrappedTitle = wrapText(title, titlePaint, maxContentWidth)
+        for (titleLine in wrappedTitle) {
+            canvas.drawText(titleLine, MARGIN, currentY, titlePaint)
+            currentY += 22f
+        }
+        canvas.drawLine(MARGIN, currentY - 6f, PAGE_WIDTH - MARGIN, currentY - 6f, linePaint)
+        currentY += 16f
+
+        for ((sectionTitle, paragraphs) in sections) {
+            ensureSpace(45f)
 
             if (sectionTitle.isNotBlank()) {
                 canvas.drawText(sectionTitle.uppercase(), MARGIN, currentY, sectionPaint)
@@ -80,16 +87,9 @@ object PdfGenerator {
             }
 
             for (paragraph in paragraphs) {
-                val wrappedLines = wrapText(paragraph, bodyPaint, PAGE_WIDTH - 2 * MARGIN)
+                val wrappedLines = wrapText(paragraph, bodyPaint, maxContentWidth)
                 for (line in wrappedLines) {
-                    if (currentY > PAGE_HEIGHT - MARGIN - 30f) {
-                        document.finishPage(page)
-                        pageNumber++
-                        pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
-                        page = document.startPage(pageInfo)
-                        canvas = page.canvas
-                        currentY = MARGIN + 20f
-                    }
+                    ensureSpace(16f)
                     canvas.drawText(line, MARGIN, currentY, bodyPaint)
                     currentY += 15f
                 }
@@ -99,7 +99,148 @@ object PdfGenerator {
         }
 
         document.finishPage(page)
+        FileOutputStream(outputFile).use { out ->
+            document.writeTo(out)
+        }
+        document.close()
+    }
 
+    /**
+     * Generates an A4 Cover Letter PDF following the exact 7-part spatial layout of MLDP:
+     * 1. Top-Left Sender | 2. Middle-Right Recipient | 3. Right Place & Date |
+     * 4. Left Bold Subject & Salutation | 5. Indented Body Paragraphs |
+     * 6. Politeness Formula | 7. Right Signature.
+     */
+    fun generateMldpCoverLetterPdf(
+        letter: MldpCoverLetterData,
+        outputFile: File
+    ) {
+        val document = PdfDocument()
+        var pageNumber = 1
+        var pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+        var page = document.startPage(pageInfo)
+        var canvas: Canvas = page.canvas
+
+        val boldPaint = Paint().apply {
+            color = Color.rgb(17, 24, 39)
+            textSize = 11f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            isAntiAlias = true
+        }
+
+        val regularPaint = Paint().apply {
+            color = Color.rgb(31, 41, 55)
+            textSize = 10.5f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            isAntiAlias = true
+        }
+
+        val subtlePaint = Paint().apply {
+            color = Color.rgb(75, 85, 99)
+            textSize = 10f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            isAntiAlias = true
+        }
+
+        val maxContentWidth = PAGE_WIDTH - 2 * MARGIN
+        val rightColX = 330f
+        val rightColWidth = PAGE_WIDTH - MARGIN - rightColX
+
+        // 1. Top-Left: Vos noms et coordonnées
+        var leftY = MARGIN + 16f
+        canvas.drawText(letter.senderName, MARGIN, leftY, boldPaint)
+        leftY += 15f
+        listOfNotNull(
+            letter.senderAddress.ifBlank { null },
+            letter.senderPhone.ifBlank { null },
+            letter.senderEmail.ifBlank { null }
+        ).forEach { line ->
+            wrapText(line, subtlePaint, 240f).forEach { wLine ->
+                canvas.drawText(wLine, MARGIN, leftY, subtlePaint)
+                leftY += 14f
+            }
+        }
+
+        // 2. Middle-Right: Coordonnées du destinataire
+        var rightY = leftY + 8f
+        wrapText(letter.recipientCompany, boldPaint, rightColWidth).forEach { wLine ->
+            canvas.drawText(wLine, rightColX, rightY, boldPaint)
+            rightY += 15f
+        }
+        listOfNotNull(
+            letter.recipientAttention.ifBlank { null },
+            letter.recipientLocation.ifBlank { null }
+        ).forEach { line ->
+            wrapText(line, subtlePaint, rightColWidth).forEach { wLine ->
+                canvas.drawText(wLine, rightColX, rightY, subtlePaint)
+                rightY += 14f
+            }
+        }
+
+        // 3. Right: Lieu et Date
+        rightY += 14f
+        wrapText(letter.placeAndDate, regularPaint, rightColWidth).forEach { wLine ->
+            canvas.drawText(wLine, rightColX, rightY, regularPaint)
+            rightY += 15f
+        }
+
+        // Advance below header blocks
+        var currentY = maxOf(leftY, rightY) + 26f
+
+        fun ensureSpace(needed: Float) {
+            if (currentY + needed > PAGE_HEIGHT - MARGIN) {
+                document.finishPage(page)
+                pageNumber++
+                pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+                page = document.startPage(pageInfo)
+                canvas = page.canvas
+                currentY = MARGIN + 20f
+            }
+        }
+
+        // 4. Objet & Salutation
+        wrapText(letter.subject, boldPaint, maxContentWidth).forEach { line ->
+            ensureSpace(16f)
+            canvas.drawText(line, MARGIN, currentY, boldPaint)
+            currentY += 16f
+        }
+        currentY += 14f
+        ensureSpace(18f)
+        canvas.drawText(letter.salutation, MARGIN, currentY, regularPaint)
+        currentY += 22f
+
+        // 5. Corps de texte (MLDP alinéas avec retrait de première ligne)
+        val firstLineIndent = 26f
+        for (para in letter.bodyParagraphs) {
+            if (para.isBlank()) continue
+            val lines = wrapTextWithIndent(para.trim(), regularPaint, maxContentWidth, firstLineIndent)
+            lines.forEachIndexed { idx, line ->
+                ensureSpace(16f)
+                val x = if (idx == 0) MARGIN + firstLineIndent else MARGIN
+                canvas.drawText(line, x, currentY, regularPaint)
+                currentY += 15.5f
+            }
+            currentY += 10f
+        }
+
+        // 6. Formule de politesse
+        if (letter.closingFormula.isNotBlank()) {
+            val closingLines = wrapTextWithIndent(letter.closingFormula.trim(), regularPaint, maxContentWidth, firstLineIndent)
+            closingLines.forEachIndexed { idx, line ->
+                ensureSpace(16f)
+                val x = if (idx == 0) MARGIN + firstLineIndent else MARGIN
+                canvas.drawText(line, x, currentY, regularPaint)
+                currentY += 15.5f
+            }
+            currentY += 24f
+        }
+
+        // 7. Signature (alignée à droite)
+        ensureSpace(24f)
+        val sigWidth = boldPaint.measureText(letter.signatureName)
+        canvas.drawText(letter.signatureName, PAGE_WIDTH - MARGIN - sigWidth - 16f, currentY, boldPaint)
+
+        document.finishPage(page)
         FileOutputStream(outputFile).use { out ->
             document.writeTo(out)
         }
@@ -107,24 +248,61 @@ object PdfGenerator {
     }
 
     private fun wrapText(text: String, paint: Paint, maxWidth: Float): List<String> {
-        val lines = mutableListOf<String>()
-        val words = text.split(" ")
+        val result = mutableListOf<String>()
+        val rawLines = text.split(Regex("\\r?\\n"))
+        for (rawLine in rawLines) {
+            val trimmed = rawLine.trim()
+            if (trimmed.isEmpty()) {
+                result.add("")
+                continue
+            }
+            val words = trimmed.split(Regex("\\s+"))
+            var currentLine = StringBuilder()
+            for (word in words) {
+                val candidate = if (currentLine.isEmpty()) word else "$currentLine $word"
+                if (paint.measureText(candidate) <= maxWidth) {
+                    currentLine.append(if (currentLine.isEmpty()) word else " $word")
+                } else {
+                    if (currentLine.isNotEmpty()) {
+                        result.add(currentLine.toString())
+                    }
+                    currentLine = StringBuilder(word)
+                }
+            }
+            if (currentLine.isNotEmpty()) {
+                result.add(currentLine.toString())
+            }
+        }
+        return result
+    }
+
+    private fun wrapTextWithIndent(
+        text: String,
+        paint: Paint,
+        maxWidth: Float,
+        firstLineIndent: Float
+    ): List<String> {
+        val result = mutableListOf<String>()
+        val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
         var currentLine = StringBuilder()
+        var isFirst = true
 
         for (word in words) {
-            val testLine = if (currentLine.isEmpty()) word else "$currentLine $word"
-            if (paint.measureText(testLine) <= maxWidth) {
+            val availWidth = if (isFirst) maxWidth - firstLineIndent else maxWidth
+            val candidate = if (currentLine.isEmpty()) word else "$currentLine $word"
+            if (paint.measureText(candidate) <= availWidth) {
                 currentLine.append(if (currentLine.isEmpty()) word else " $word")
             } else {
                 if (currentLine.isNotEmpty()) {
-                    lines.add(currentLine.toString())
+                    result.add(currentLine.toString())
+                    isFirst = false
                 }
                 currentLine = StringBuilder(word)
             }
         }
         if (currentLine.isNotEmpty()) {
-            lines.add(currentLine.toString())
+            result.add(currentLine.toString())
         }
-        return lines
+        return result
     }
 }

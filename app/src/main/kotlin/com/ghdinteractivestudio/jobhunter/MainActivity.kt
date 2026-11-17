@@ -1,11 +1,17 @@
 package com.ghdinteractivestudio.jobhunter
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -29,6 +35,7 @@ import com.ghdinteractivestudio.jobhunter.domain.ai.CvTailoringEngine
 import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationAutomationManager
 import com.ghdinteractivestudio.jobhunter.domain.automation.ApplicationOutcome
 import com.ghdinteractivestudio.jobhunter.domain.document.CvParser
+import com.ghdinteractivestudio.jobhunter.domain.document.DeadlineParser
 import com.ghdinteractivestudio.jobhunter.domain.model.JobOffer
 import com.ghdinteractivestudio.jobhunter.domain.model.JobStatus
 import com.ghdinteractivestudio.jobhunter.domain.model.UserProfile
@@ -38,9 +45,9 @@ import com.ghdinteractivestudio.jobhunter.ui.screens.CvScreen
 import com.ghdinteractivestudio.jobhunter.ui.screens.PipelineScreen
 import com.ghdinteractivestudio.jobhunter.ui.screens.RadarScreen
 import com.ghdinteractivestudio.jobhunter.ui.theme.JobHunterTheme
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,8 +64,19 @@ class MainActivity : ComponentActivity() {
 
     private val scanner = JobScanner()
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Request POST_NOTIFICATIONS on Android 13+ so 24/7 Agent status notifications appear properly
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
 
         val db = AppDatabase.getInstance(this)
         val offerDao = db.jobOfferDao()
@@ -67,14 +85,13 @@ class MainActivity : ComponentActivity() {
 
         handleIntent(intent)
 
-        // Observe Room Database
-        val ioScope = CoroutineScope(Dispatchers.Main)
-        ioScope.launch {
+        // Observe Room Database safely tied to Activity lifecycle (zero leaks)
+        lifecycleScope.launch {
             offerDao.getAllOffers().map { list -> list.map { it.toDomain() } }.collect { offers ->
                 allOffersState.value = offers
             }
         }
-        ioScope.launch {
+        lifecycleScope.launch {
             profileDao.getProfileFlow().collect { entity ->
                 if (entity != null) {
                     val domainProfile = entity.toDomain()
@@ -84,10 +101,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Initial clean real-web scan when radar opens empty
-        CoroutineScope(Dispatchers.IO).launch {
-            val existingProfile = profileDao.getProfile()?.toDomain()
-            handleRefreshScan(existingProfile)
+        // Purge expired offers immediately and perform initial scan only if DB is empty or stale (> 10 min)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val minPub = now - (DeadlineParser.DEFAULT_MAX_OFFER_AGE_DAYS * 86_400_000L)
+            offerDao.purgeExpiredDetectedOffers(now, minPub)
+
+            val currentOffers = offerDao.getAllOffers().firstOrNull() ?: emptyList()
+            val lastTs = settingsRepo.settings.value.lastScanTimestamp
+            if (currentOffers.isEmpty() || (now - lastTs) > 10 * 60_000L) {
+                val existingProfile = profileDao.getProfile()?.toDomain()
+                handleRefreshScan(existingProfile, settingsRepo, showToast = false)
+            }
         }
 
         setContent {
@@ -125,7 +150,7 @@ class MainActivity : ComponentActivity() {
                             },
                             onRefreshScanClick = {
                                 coroutineScope.launch {
-                                    handleRefreshScan(userProfileState.value)
+                                    handleRefreshScan(userProfileState.value, settingsRepo, showToast = true)
                                 }
                             },
                             onAnalyzeOfferClick = { offer ->
@@ -218,19 +243,19 @@ class MainActivity : ComponentActivity() {
         val settingsRepo = SettingsRepository.getInstance(this)
         val testPath = intent?.getStringExtra("import_path")
         if (!testPath.isNullOrBlank()) {
-            CoroutineScope(Dispatchers.IO).launch {
+            lifecycleScope.launch(Dispatchers.IO) {
                 val file = File(testPath)
                 if (file.exists()) {
                     handleImportCv(Uri.fromFile(file), settingsRepo)
                 }
             }
         } else if (intent?.getBooleanExtra("reanalyze_cv", false) == true) {
-            CoroutineScope(Dispatchers.IO).launch {
+            lifecycleScope.launch(Dispatchers.IO) {
                 val existing = AppDatabase.getInstance(this@MainActivity).userProfileDao().getProfile()?.toDomain()
                 if (existing != null && existing.rawCvContent.isNotBlank()) {
                     userProfileState.value = existing
                     handleReanalyzeCvWithAi(settingsRepo)
-                    handleRefreshScan(userProfileState.value)
+                    handleRefreshScan(userProfileState.value, settingsRepo, showToast = false)
                 }
             }
         }
@@ -251,22 +276,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private suspend fun handleRefreshScan(profile: UserProfile?) = withContext(Dispatchers.IO) {
+    private suspend fun handleRefreshScan(
+        profile: UserProfile?,
+        settingsRepo: SettingsRepository,
+        showToast: Boolean = true
+    ) = withContext(Dispatchers.IO) {
         if (isScanningState.value) return@withContext
         isScanningState.value = true
         runCatching {
             val db = AppDatabase.getInstance(this@MainActivity)
+            val now = System.currentTimeMillis()
+            val minPub = now - (DeadlineParser.DEFAULT_MAX_OFFER_AGE_DAYS * 86_400_000L)
+            db.jobOfferDao().purgeExpiredDetectedOffers(now, minPub)
+
             val offers = scanner.scanOffers(profile)
             if (offers.isNotEmpty()) {
                 db.jobOfferDao().clearDetectedOffers()
                 db.jobOfferDao().insertAll(offers.map { JobOfferEntity.fromDomain(it) })
+                settingsRepo.update { it.copy(lastScanTimestamp = System.currentTimeMillis()) }
             }
-            withContext(Dispatchers.Main) {
-                Toast.makeText(
-                    this@MainActivity,
-                    "${offers.size} offres réelles trouvées (Algérie & Monde)",
-                    Toast.LENGTH_SHORT
-                ).show()
+            if (showToast) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "${offers.size} offres actives valides (Algérie & Monde)",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }.onFailure { err ->
             withContext(Dispatchers.Main) {
@@ -280,6 +316,21 @@ class MainActivity : ComponentActivity() {
         isAnalyzingCvState.value = true
         runCatching {
             val extractedData = CvParser.parseCvFile(this@MainActivity, uri)
+
+            // Save persistent backup copy of original user CV file cleanly inside app storage
+            val backupFile = runCatching {
+                val cvDir = File(filesDir, "source_cv").apply { mkdirs() }
+                val dest = File(cvDir, extractedData.fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_"))
+                if (uri.scheme == "file" && uri.path != null) {
+                    File(uri.path!!).copyTo(dest, overwrite = true)
+                } else {
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        dest.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+                dest.absolutePath
+            }.getOrDefault("")
+
             val settings = settingsRepo.settings.value
             val engine = CvTailoringEngine(settings)
 
@@ -303,6 +354,7 @@ class MainActivity : ComponentActivity() {
                 languages = baseProfile.languages.ifEmpty { det.languages },
                 sourceCvFileName = extractedData.fileName,
                 sourceCvFormat = extractedData.format,
+                sourceCvPath = backupFile,
                 rawCvContent = extractedData.rawText,
                 parsedAt = System.currentTimeMillis()
             )
@@ -321,7 +373,7 @@ class MainActivity : ComponentActivity() {
             }
 
             // Automatically trigger a targeted job radar scan matching the freshly imported CV
-            handleRefreshScan(finalProfile)
+            handleRefreshScan(finalProfile, settingsRepo, showToast = false)
         }.onFailure { err ->
             withContext(Dispatchers.Main) {
                 Toast.makeText(this@MainActivity, "Erreur analyse CV : ${err.message}", Toast.LENGTH_LONG).show()
@@ -345,6 +397,7 @@ class MainActivity : ComponentActivity() {
                 phone = parsed.phone.ifBlank { current.phone },
                 sourceCvFileName = current.sourceCvFileName,
                 sourceCvFormat = current.sourceCvFormat,
+                sourceCvPath = current.sourceCvPath,
                 rawCvContent = current.rawCvContent,
                 parsedAt = System.currentTimeMillis()
             )

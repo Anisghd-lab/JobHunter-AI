@@ -206,10 +206,18 @@ fun AgentScreen(
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
                             if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) {
-                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                    data = Uri.parse("package:${context.packageName}")
+                                runCatching {
+                                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    context.startActivity(intent)
                                 }
-                                context.startActivity(intent)
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Optimisation batterie déjà désactivée pour JobHunter AI ✓",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
                             }
                         }
                     },

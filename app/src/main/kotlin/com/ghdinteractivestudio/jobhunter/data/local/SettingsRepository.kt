@@ -75,7 +75,8 @@ data class AppSettings(
     val agentActive247: Boolean = true,
     val autoApplyEnabled: Boolean = false,
     val autoApplyMinScore: Int = 70,
-    val isDarkTheme: Boolean = true
+    val isDarkTheme: Boolean = true,
+    val lastScanTimestamp: Long = 0L
 ) {
     fun apiKeyFor(provider: FreeLlmProvider): String = when (provider) {
         FreeLlmProvider.OPENROUTER_FREE -> openrouterApiKey
@@ -126,7 +127,8 @@ class SettingsRepository private constructor(context: Context) {
             agentActive247 = prefs.getBoolean("agent_247", true),
             autoApplyEnabled = prefs.getBoolean("auto_apply", false),
             autoApplyMinScore = prefs.getInt("auto_apply_min_score", 70),
-            isDarkTheme = prefs.getBoolean("dark_theme", true)
+            isDarkTheme = prefs.getBoolean("dark_theme", true),
+            lastScanTimestamp = prefs.getLong("last_scan_ts", 0L)
         )
     }
 
@@ -149,6 +151,7 @@ class SettingsRepository private constructor(context: Context) {
             putBoolean("auto_apply", next.autoApplyEnabled)
             putInt("auto_apply_min_score", next.autoApplyMinScore)
             putBoolean("dark_theme", next.isDarkTheme)
+            putLong("last_scan_ts", next.lastScanTimestamp)
         }.apply()
         _settings.value = next
     }
