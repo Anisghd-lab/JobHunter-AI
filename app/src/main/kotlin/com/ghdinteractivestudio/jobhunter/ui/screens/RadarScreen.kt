@@ -747,13 +747,26 @@ fun ApplyAssistantDialog(
                 Spacer(Modifier.height(12.dp))
 
                 if (offer.recruiterEmail.isNotBlank() && !outcome.sentSilentlyByEmail) {
+                    val repo = remember { com.ghdinteractivestudio.jobhunter.data.local.SettingsRepository.getInstance(context) }
+                    val appSettings by repo.settings.collectAsState()
+                    val yahooPkg = if (appSettings.preferInstalledYahooApp) appSettings.connectedYahooPackage else ""
                     GlassSolidButton(
-                        text = "Envoyer Email (${offer.recruiterEmail})",
+                        text = if (yahooPkg.isNotBlank()) "Envoyer via Yahoo Mail" else "Envoyer Email (${offer.recruiterEmail})",
                         icon = Icons.Default.Email,
                         containerColor = Palette.blueSolidBg,
                         onClick = {
-                            val intent = ApplicationAutomationManager.buildEmailComposeIntent(context, offer)
-                            runCatching { context.startActivity(Intent.createChooser(intent, "Envoyer par Email")) }
+                            val directIntent = ApplicationAutomationManager.buildEmailComposeIntent(
+                                context = context,
+                                offer = offer,
+                                preferredPackage = yahooPkg
+                            )
+                            val openedDirect = if (yahooPkg.isNotBlank()) {
+                                runCatching { context.startActivity(directIntent) }.isSuccess
+                            } else false
+                            if (!openedDirect) {
+                                val fallbackIntent = ApplicationAutomationManager.buildEmailComposeIntent(context, offer)
+                                runCatching { context.startActivity(Intent.createChooser(fallbackIntent, "Envoyer par Email")) }
+                            }
                         },
                         modifier = Modifier.fillMaxWidth()
                     )

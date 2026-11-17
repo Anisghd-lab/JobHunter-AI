@@ -5,8 +5,8 @@
   "3": "ApplicationAutomationManager.kt",
   "4": "DocxGenerator",
   "5": "Glass.kt",
-  "6": "PipelineScreen.kt",
-  "7": "Capsule",
+  "6": "CvScreen.kt",
+  "7": "GlassSoftButton",
   "8": "GlassTabBar.kt",
   "9": "Uri",
   "10": "CvTailoringEngine",
@@ -33,10 +33,12 @@
   "31": "PrimaryKey",
   "32": "GlassStyle",
   "33": "Serializable",
-  "34": "Volatile",
+  "34": "FreeLlmProvider",
   "35": ".onCreate",
-  "36": "Result",
+  "36": "Volatile",
+  "37": "Intent",
   "38": "Composable",
   "39": "OptIn",
-  "40": "StateFlow"
+  "40": "StateFlow",
+  "41": "Result"
 }

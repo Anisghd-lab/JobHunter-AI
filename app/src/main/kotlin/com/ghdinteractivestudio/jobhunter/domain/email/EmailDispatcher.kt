@@ -316,7 +316,7 @@ class EmailDispatcher(private val config: EmailConfig) {
                     error("SMTP Connection error ($port): $banner")
                 }
 
-                sendCmd("EHLO localhost", "250")
+                var ehloResp = sendCmd("EHLO localhost", "250")
 
                 if (port == 587) {
                     sendCmd("STARTTLS", "220")
@@ -326,14 +326,28 @@ class EmailDispatcher(private val config: EmailConfig) {
                     socket = tlsSocket
                     reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
                     writer = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
-                    sendCmd("EHLO localhost", "250")
+                    ehloResp = sendCmd("EHLO localhost", "250")
                 }
 
                 val user = config.smtpUser.ifBlank { config.senderEmail }.trim()
                 val pass = config.normalizedPassword()
-                sendCmd("AUTH LOGIN", "334")
-                sendCmd(Base64.encodeToString(user.toByteArray(Charsets.UTF_8), Base64.NO_WRAP), "334")
-                sendCmd(Base64.encodeToString(pass.toByteArray(Charsets.UTF_8), Base64.NO_WRAP), "235")
+
+                // Prefer AUTH PLAIN when advertised (Yahoo Mail Hermes prefers AUTH PLAIN), with automatic AUTH LOGIN fallback
+                var authenticated = false
+                if (ehloResp.contains("PLAIN", ignoreCase = true)) {
+                    val plainToken = Base64.encodeToString("\u0000$user\u0000$pass".toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                    val plainReply = sendCmd("AUTH PLAIN $plainToken")
+                    if (plainReply.startsWith("235")) {
+                        authenticated = true
+                    } else if (!plainReply.startsWith("535")) {
+                        // Continue to AUTH LOGIN fallback on non-fatal auth mechanism mismatch
+                    }
+                }
+                if (!authenticated) {
+                    sendCmd("AUTH LOGIN", "334")
+                    sendCmd(Base64.encodeToString(user.toByteArray(Charsets.UTF_8), Base64.NO_WRAP), "334")
+                    sendCmd(Base64.encodeToString(pass.toByteArray(Charsets.UTF_8), Base64.NO_WRAP), "235")
+                }
 
                 sessionBlock(writer) { readSmtpResponse(reader) }
 
@@ -343,9 +357,13 @@ class EmailDispatcher(private val config: EmailConfig) {
             } catch (e: Throwable) {
                 runCatching { socket?.close() }
                 lastError = e
-                // Only avoid retry if credentials themselves were explicitly rejected (535 Authentication failed)
+                // Surface exact 535 reply & guidance without pointless port retries
                 if (e.message?.contains("535") == true || e.message?.contains("Authentication") == true) {
-                    throw IllegalStateException("Identifiants SMTP refusés (535). Utilisez un « Mot de passe d'application » Yahoo/Gmail.", e)
+                    val detail = e.message?.substringAfter("): ")?.trim().orEmpty()
+                    throw IllegalStateException(
+                        "Identifiants refusés ($detail). Yahoo/Gmail exige un « Mot de passe d'application » 16 car. (pas le mot de passe du compte), sinon liez l'appli Yahoo Mail ci-dessous.",
+                        e
+                    )
                 }
             }
         }

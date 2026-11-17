@@ -79,6 +79,8 @@ data class AppSettings(
     val aiAutonomousEmailControl: Boolean = true,
     val autoFollowUpEnabled: Boolean = true,
     val followUpDelayDays: Int = 5,
+    val preferInstalledYahooApp: Boolean = false,
+    val connectedYahooPackage: String = "",
     val isDarkTheme: Boolean = true,
     val lastScanTimestamp: Long = 0L
 ) {
@@ -135,6 +137,8 @@ class SettingsRepository private constructor(context: Context) {
             aiAutonomousEmailControl = prefs.getBoolean("ai_auto_email", true),
             autoFollowUpEnabled = prefs.getBoolean("auto_follow_up", true),
             followUpDelayDays = prefs.getInt("follow_up_days", 5),
+            preferInstalledYahooApp = prefs.getBoolean("prefer_yahoo_app", false),
+            connectedYahooPackage = prefs.getString("connected_yahoo_pkg", "") ?: "",
             isDarkTheme = prefs.getBoolean("dark_theme", true),
             lastScanTimestamp = prefs.getLong("last_scan_ts", 0L)
         )
@@ -162,6 +166,8 @@ class SettingsRepository private constructor(context: Context) {
             putBoolean("ai_auto_email", next.aiAutonomousEmailControl)
             putBoolean("auto_follow_up", next.autoFollowUpEnabled)
             putInt("follow_up_days", next.followUpDelayDays)
+            putBoolean("prefer_yahoo_app", next.preferInstalledYahooApp)
+            putString("connected_yahoo_pkg", next.connectedYahooPackage.trim())
             putBoolean("dark_theme", next.isDarkTheme)
             putLong("last_scan_ts", next.lastScanTimestamp)
         }.apply()

@@ -34,9 +34,10 @@ Application Android native (Kotlin + Jetpack Compose Liquid Glass) servant d'age
   - Fond atmosphérique translucide `LiquidGlassBackdrop` identique en qualité entre Dark Obsidian OLED et Light Mode Crystal Givré.
   - Résolution définitive du contraste (suppression des fonds blancs/émeraude illisibles avec texte blanc grâce aux tokens `emeraldSolidBg`, `blueSolidBg`, `GlassSolidButton`, `GlassSoftButton`, `GlassFilterChip` et `glassFieldColors()`).
   - Uniformisation de la hauteur (`42dp` / `38dp`), des espacements et troncature sécurisée (`maxLines = 1`) sur tous les boutons sans débordement.
-- [x] **Module Email Autonome & Suivi IA (`EmailDispatcher`, `ApplicationAutomationManager`, `JobHunterForegroundService`, `PipelineScreen`, `AgentScreen`)** :
-  - Normalisation automatique des App Passwords (espaces Yahoo/Gmail), bascule auto port `465`/`587` et bouton **Tester Connexion Email**.
-  - Lecteur IMAP TLS `993` (`EXAMINE INBOX`) + classification IA (`classifyRecruiterReply`) + génération & envoi automatique de relance IA (`generateFollowUpEmail`, `Relancer IA`, `Suivi Réponses & Relances IA`).
+- [x] **Module Email Autonome & Liaison Appli Yahoo (`EmailDispatcher`, `ApplicationAutomationManager`, `JobHunterForegroundService`, `PipelineScreen`, `AgentScreen`)** :
+  - Support `AUTH PLAIN` + `AUTH LOGIN` sur SMTP `465`/`587`, normalisation automatique des App Passwords (espaces Yahoo/Gmail), bascule auto de port, et diagnostic clair en cas de `535`.
+  - Liaison directe avec l'application **Yahoo Mail installée** (`<queries>`, `AccountManager` picker, envoi pré-rempli direct sans sélecteur via `com.yahoo.mobile.client.android.mail` + lien direct générateur App Password Yahoo `login.yahoo.com/myaccount/security`).
+  - Lecteur **IMAP TLS `993`** (`EXAMINE INBOX`) + classification IA (`classifyRecruiterReply`) + génération & envoi automatique de relance IA (`generateFollowUpEmail`, `Relancer IA`, `Suivi Réponses & Relances IA`).
   - Migration Room explicite `MIGRATION_3_4` (version 4 : `followUpCount`, `lastFollowUpAt`, `lastReplySummary`).
 
 ---

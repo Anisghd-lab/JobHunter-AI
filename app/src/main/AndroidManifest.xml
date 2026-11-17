@@ -18,6 +18,17 @@
     <!-- File handling -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
+    <!-- Package visibility for installed Mail apps (Android 11+) -->
+    <queries>
+        <package android:name="com.yahoo.mobile.client.android.mail" />
+        <package android:name="com.google.android.gm" />
+        <package android:name="com.android.email" />
+        <intent>
+            <action android:name="android.intent.action.SEND_MULTIPLE" />
+            <data android:mimeType="*/*" />
+        </intent>
+    </queries>
+
     <application
         android:name=".JobHunterApp"
         android:allowBackup="true"

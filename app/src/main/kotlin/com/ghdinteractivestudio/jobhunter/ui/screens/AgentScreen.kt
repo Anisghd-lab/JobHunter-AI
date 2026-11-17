@@ -1,11 +1,14 @@
 package com.ghdinteractivestudio.jobhunter.ui.screens
 
+import android.accounts.AccountManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,7 +35,9 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -651,6 +656,87 @@ fun AgentScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(Modifier.height(8.dp))
+
+                val yahooPackage = "com.yahoo.mobile.client.android.mail"
+                val isYahooInstalled = remember(context) {
+                    runCatching { context.packageManager.getPackageInfo(yahooPackage, 0) }.isSuccess
+                }
+                val yahooAccountPicker = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.StartActivityForResult()
+                ) { result ->
+                    val pickedName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)?.trim().orEmpty()
+                    if (pickedName.isNotBlank()) {
+                        settingsRepo.update {
+                            it.copy(
+                                senderEmail = pickedName,
+                                preferInstalledYahooApp = true,
+                                connectedYahooPackage = if (isYahooInstalled) yahooPackage else ""
+                            )
+                        }
+                        emailTestMsg = "✓ Compte '$pickedName' lié${if (isYahooInstalled) " avec l'appli Yahoo Mail" else ""} !"
+                    } else if (isYahooInstalled) {
+                        settingsRepo.update {
+                            it.copy(
+                                preferInstalledYahooApp = true,
+                                connectedYahooPackage = yahooPackage
+                            )
+                        }
+                        emailTestMsg = "✓ Appli Yahoo Mail détectée et définie pour les envois directs (contourne SMTP 535)."
+                    }
+                }
+
+                // Dual Uniform Buttons: Connect Installed Yahoo App OR Generate Yahoo App Password
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    GlassSoftButton(
+                        text = if (settings.preferInstalledYahooApp && isYahooInstalled) "✓ Yahoo App Liée" else "Connecter Appli Yahoo",
+                        icon = Icons.Default.Link,
+                        accentColor = Palette.emeraldAccent,
+                        height = 40.dp,
+                        onClick = {
+                            if (!isYahooInstalled) {
+                                emailTestMsg = "✗ Application Yahoo Mail non détectée sur l'appareil."
+                                return@GlassSoftButton
+                            }
+                            settingsRepo.update {
+                                it.copy(
+                                    smtpHost = "smtp.mail.yahoo.com",
+                                    smtpPort = 465,
+                                    preferInstalledYahooApp = true,
+                                    connectedYahooPackage = yahooPackage
+                                )
+                            }
+                            runCatching {
+                                val pickerIntent = AccountManager.newChooseAccountIntent(
+                                    null, null, null, null, null, null, null
+                                )
+                                yahooAccountPicker.launch(pickerIntent)
+                            }.onFailure {
+                                emailTestMsg = "✓ Appli Yahoo Mail installée et liée pour les envois pré-remplis."
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    GlassSoftButton(
+                        text = "App Password ↗",
+                        icon = Icons.Default.OpenInBrowser,
+                        accentColor = Palette.electricBlue,
+                        height = 40.dp,
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse("https://login.yahoo.com/myaccount/security"))
+                                )
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
                 if (emailTestMsg != null) {
                     Spacer(Modifier.height(8.dp))

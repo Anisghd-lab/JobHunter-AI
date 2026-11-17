@@ -493,9 +493,14 @@ object ApplicationAutomationManager {
     }
 
     /**
-     * Launches Android Email App pre-filled with recipient, subject, cover letter and FileProvider attachments.
+     * Launches installed Yahoo Mail app (when connected/available) or chooser pre-filled with
+     * recipient, subject, cover letter and FileProvider attachments.
      */
-    fun buildEmailComposeIntent(context: Context, offer: JobOffer): Intent {
+    fun buildEmailComposeIntent(
+        context: Context,
+        offer: JobOffer,
+        preferredPackage: String = ""
+    ): Intent {
         val uris = ArrayList<Uri>()
         listOf(offer.tailoredCvPath, offer.letterPath).forEach { path ->
             if (path.isNotBlank()) {
@@ -512,7 +517,7 @@ object ApplicationAutomationManager {
             }
         }
         return Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-            type = "*/*"
+            type = "message/rfc822"
             if (offer.recruiterEmail.isNotBlank()) {
                 putExtra(Intent.EXTRA_EMAIL, arrayOf(offer.recruiterEmail))
             }
@@ -521,6 +526,14 @@ object ApplicationAutomationManager {
             if (uris.isNotEmpty()) {
                 putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            if (preferredPackage.isNotBlank()) {
+                val installed = runCatching {
+                    context.packageManager.getPackageInfo(preferredPackage, 0)
+                }.isSuccess
+                if (installed) {
+                    setPackage(preferredPackage)
+                }
             }
         }
     }
