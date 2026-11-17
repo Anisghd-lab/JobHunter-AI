@@ -173,8 +173,8 @@ class JobHunterForegroundService : Service() {
                     Log.e(TAG, "Hunting loop error: ${err.message}", err)
                 }
 
-                // Scan interval: 30 minutes
-                delay(30 * 60 * 1000L)
+                // Hunting & Auto-Apply loop: repeats every 8 minutes 24/7 non-stop
+                delay(8 * 60 * 1000L)
             }
         }
     }

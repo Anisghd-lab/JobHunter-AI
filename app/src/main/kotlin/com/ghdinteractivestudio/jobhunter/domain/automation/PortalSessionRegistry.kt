@@ -62,6 +62,17 @@ object PortalSessionRegistry {
             signupUrl = "https://www.qatarliving.com/en/jobs",
             checkUrl = "https://www.qatarliving.com/en/jobs",
             authCookieHints = listOf("qat", "qat_refresh", "ssess", "sess", "ql_", "token", "auth", "session")
+        ),
+        JobPortalAccount(
+            id = "linkedin",
+            name = "LinkedIn Jobs",
+            badge = "💼 Réseau Pro",
+            description = "Postuler en 1 clic sur LinkedIn avec session persistante",
+            domainUrl = "https://www.linkedin.com",
+            loginUrl = "https://www.linkedin.com/login",
+            signupUrl = "https://www.linkedin.com/signup",
+            checkUrl = "https://www.linkedin.com/feed/",
+            authCookieHints = listOf("li_at", "liap", "jsessionid", "bcookie", "bscookie")
         )
     )
 
@@ -136,6 +147,11 @@ object PortalSessionRegistry {
                             !location.contains("login") &&
                             (body.contains("logout") || body.contains("sign out") || body.contains("qlnext_user"))
                         (resp.isSuccessful && validJwtSession) || (hasLikelyAuthCookie && hasDomSignInSuccess)
+                    }
+                    "linkedin" -> {
+                        val hasLiAt = cookieMap["li_at"].orEmpty().length >= 20 || cookieMap["liap"].orEmpty().length >= 10
+                        val bodyLoggedIn = body.contains("feed") || body.contains("mynetwork") || body.contains("sign out")
+                        hasLiAt || (resp.code in 300..399 && !location.contains("login")) || bodyLoggedIn
                     }
                     else -> {
                         val hasLoggedInDom = body.contains("logout") || body.contains("sign out") || body.contains("my account")

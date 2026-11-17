@@ -131,6 +131,13 @@ class JobScanner {
             }
         }
 
+        // 1.6 LinkedIn Public Jobs — Algérie, Golfe (UAE, KSA, Qatar) & Worldwide
+        runCatching {
+            allOffers.addAll(fetchLinkedInJobs(profile, searchTerms))
+        }.onFailure {
+            Log.w(TAG, "LinkedIn Jobs error: ${it.message}")
+        }
+
         // =========================================================================
         // PRIORITÉ 2 : PLATEFORMES TIERS & PORTAILS WEB (Dossiers Web & Backup)
         // =========================================================================
@@ -780,6 +787,118 @@ class JobScanner {
             }
         }
         return filterAndPrioritize(offers, keywords, limit = 10)
+    }
+
+    /**
+     * LinkedIn Public Jobs Scraper (Algérie, Golfe UAE/KSA/Qatar & International)
+     * Utilise les points d'accès publics sans authentification + inspection de la description détaillée pour extraire les e-mails recruteurs.
+     */
+    private fun fetchLinkedInJobs(profile: UserProfile?, keywords: List<String>): List<JobOffer> {
+        val targets = listOf(
+            Triple("🇩🇿 Algérie", "Algeria", "ALGERIA"),
+            Triple("🇦🇪 Émirats Arabes Unis", "United+Arab+Emirates", "GULF"),
+            Triple("🇸🇦 Arabie Saoudite", "Saudi+Arabia", "GULF"),
+            Triple("🇶🇦 Qatar", "Qatar", "GULF"),
+            Triple("🌍 Worldwide", "Worldwide", "INTERNATIONAL")
+        )
+
+        val offers = mutableListOf<JobOffer>()
+        val queryTerms = if (profile != null && profile.combinedSearchCorpus().isNotBlank()) {
+            deriveSearchKeywords(profile).take(3).joinToString(" OR ")
+        } else {
+            "recrutement OR \"ressources humaines\" OR administration"
+        }
+        val encodedQuery = URLEncoder.encode(queryTerms, "UTF-8")
+
+        for ((flagCountry, locParam, scope) in targets) {
+            runCatching {
+                val url = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=$encodedQuery&location=$locParam&start=0"
+                val req = Request.Builder().url(url).header("User-Agent", UA).build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val html = resp.body?.string() ?: return@use
+
+                    val cards = html.split("base-card relative w-full").drop(1)
+                    for (card in cards.take(15)) {
+                        val titleMatch = Regex("""class="base-search-card__title">([^<]+)</h3>""").find(card)
+                        val rawTitle = titleMatch?.groupValues?.get(1)?.trim().orEmpty()
+                        val title = HtmlSanitizer.cleanToReadableText(rawTitle)
+                        if (title.isBlank()) continue
+
+                        val compMatch = Regex("""class="base-search-card__subtitle"[^>]*>(.*?)</h4>""", RegexOption.DOT_MATCHES_ALL).find(card)
+                        val company = compMatch?.groupValues?.get(1)?.replace(Regex("<[^>]+>"), "")?.trim()?.ifBlank { "Entreprise LinkedIn" } ?: "Entreprise LinkedIn"
+
+                        val locMatch = Regex("""class="job-search-card__location">([^<]+)</span>""").find(card)
+                        val location = locMatch?.groupValues?.get(1)?.trim() ?: locParam.replace("+", " ")
+
+                        val linkMatch = Regex("""class="base-card__full-link[^"]*"\s+href="([^"]+)"""").find(card)
+                        val jobUrl = linkMatch?.groupValues?.get(1)?.trim().orEmpty()
+                        if (jobUrl.isBlank()) continue
+
+                        val dateMatch = Regex("""datetime="([^"]+)"""").find(card)
+                        val pubDate = dateMatch?.groupValues?.get(1)?.trim().orEmpty()
+
+                        val jobId = Regex("""-([0-9]+)\?""").find(jobUrl)?.groupValues?.get(1).orEmpty()
+
+                        var cleanDesc = "$title chez $company — $location. Offre officielle LinkedIn ($flagCountry)."
+                        var recruiterEmail = ""
+
+                        // Fetch live job description if jobId is available (cap fetches per target)
+                        if (jobId.isNotBlank() && offers.size < 25) {
+                            runCatching {
+                                val dUrl = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/$jobId"
+                                val dReq = Request.Builder().url(dUrl).header("User-Agent", UA).build()
+                                httpClient.newCall(dReq).execute().use { dResp ->
+                                    if (dResp.isSuccessful) {
+                                        val dHtml = dResp.body?.string().orEmpty()
+                                        val descMatch = Regex("""<div class="show-more-less-html__markup[^"]*"[^>]*>(.*?)</div>""", RegexOption.DOT_MATCHES_ALL).find(dHtml)
+                                        if (descMatch != null) {
+                                            val fullDesc = HtmlSanitizer.cleanToReadableText(descMatch.groupValues[1])
+                                            if (fullDesc.length > 30) cleanDesc = fullDesc
+                                            recruiterEmail = HtmlSanitizer.extractRecruiterEmail(descMatch.groupValues[1]).ifBlank {
+                                                HtmlSanitizer.extractRecruiterEmail(fullDesc)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        val tags = buildList {
+                            add("💼 LinkedIn")
+                            add(flagCountry)
+                            if (scope == "ALGERIA") add("🇩🇿 Algérie")
+                            if (scope == "GULF") add("🏜️ Golfe")
+                        }.distinct()
+
+                        offers.add(
+                            JobOffer(
+                                id = "linkedin_${jobUrl.hashCode()}",
+                                title = title,
+                                company = company,
+                                location = location,
+                                isRemote = location.contains("remote", ignoreCase = true),
+                                contractType = "CDI / LinkedIn",
+                                description = cleanDesc,
+                                sourcePlatform = "LinkedIn Jobs",
+                                url = jobUrl,
+                                detectedAt = System.currentTimeMillis(),
+                                requiredFormat = detectFormatFromText(cleanDesc),
+                                recruiterEmail = recruiterEmail,
+                                tags = tags,
+                                regionScope = scope,
+                                workMode = if (location.contains("remote", ignoreCase = true)) "REMOTE" else "ONSITE",
+                                applicationMethod = if (recruiterEmail.isNotBlank()) "EMAIL" else "WEBSITE",
+                                publishedDate = pubDate.take(10)
+                            ).withDeadlineCheck(rawPublished = pubDate)
+                        )
+                    }
+                }
+            }.onFailure {
+                Log.w(TAG, "LinkedIn jobs ($locParam) error: ${it.message}")
+            }
+        }
+        return filterAndPrioritize(offers.distinctBy { it.url }, keywords, limit = 40)
     }
 
     /**

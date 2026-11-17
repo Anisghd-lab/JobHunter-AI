@@ -48,9 +48,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/data/remote/JobScanner.kt": {
-    "mtime": 1794931004.0776873,
-    "seen": 1794932033.6589837,
-    "ast_hash": "e08685a86046a561544c8b211e0505cd",
+    "mtime": 1794933485.5741603,
+    "seen": 1794933935.8960676,
+    "ast_hash": "0a262c48a8b997638533b260d15c9b10",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/ai/CvTailoringEngine.kt": {
@@ -108,9 +108,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/service/JobHunterForegroundService.kt": {
-    "mtime": 1794923713.1252365,
-    "seen": 1794924063.2023895,
-    "ast_hash": "3a3d7c9375ddcb276befad26a19c7e18",
+    "mtime": 1794933523.1928427,
+    "seen": 1794933935.896107,
+    "ast_hash": "9962e407024f50cefe5027db9a0eaee0",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/service/JobHunterScheduler.kt": {
@@ -204,9 +204,9 @@
     "semantic_hash": ""
   },
   "PROJECT_STATE.md": {
-    "mtime": 1794926613.4813573,
-    "seen": 1794926679.15901,
-    "ast_hash": "8476a06d98385d2a7fb9332899d826a6",
+    "mtime": 1794932157.851003,
+    "seen": 1794933935.8961353,
+    "ast_hash": "49d99703d20c208b57f5c3af2147f67b",
     "semantic_hash": ""
   },
   "app/src/main/res/mipmap-hdpi/ic_launcher.png": {
@@ -390,9 +390,9 @@
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/domain/automation/PortalSessionRegistry.kt": {
-    "mtime": 1794926518.3253574,
-    "seen": 1794926679.1589262,
-    "ast_hash": "4a005a8fc24188c3415e878ac2a31ed2",
+    "mtime": 1794933066.465681,
+    "seen": 1794933935.8960814,
+    "ast_hash": "aea31c6b1904a54b62df17b1bf4abb2d",
     "semantic_hash": ""
   },
   "app/src/main/kotlin/com/ghdinteractivestudio/jobhunter/ui/screens/WebPortalAssistantDialog.kt": {
