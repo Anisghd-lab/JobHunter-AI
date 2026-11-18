@@ -138,9 +138,9 @@ Compare honnêtement ce profil réel avec cette offre d'emploi web :
 3. Vérifie le format exigé dans l'offre ("PDF", "DOCX", ou "ANY" si non précisé).
 
 Profil Réel du Candidat :
-Nom : ${profile.fullName}
+Nom : ${profile.effectiveFullName()}
 Localisation : ${profile.address}
-Titre : ${profile.title}
+Titre : ${profile.effectiveTitle()}
 Résumé : ${profile.summary}
 Compétences : ${(profile.skills + profile.softSkills).distinct().joinToString(", ")}
 Langues : ${profile.languages.joinToString(", ")}
@@ -181,7 +181,7 @@ Réponds UNIQUEMENT en JSON strict :
 Adapte l'accroche et la priorisation des compétences du CV réel pour cette offre précise.
 INTERDICTION ABSOLUE D'INVENTER des postes, entreprises ou diplômes.
 
-Candidat : ${profile.fullName} | ${profile.title}
+Candidat : ${profile.effectiveFullName()} | ${profile.effectiveTitle()}
 Compétences réelles : ${(profile.skills + profile.softSkills).distinct().joinToString(", ")}
 Expériences réelles : ${profile.experiences.joinToString(" | ") { "${it.title} chez ${it.company} (${it.period}): ${it.description.take(250)}" }}
 
@@ -412,70 +412,101 @@ Reply ONLY with valid pure JSON (no markdown code fences):
         val topCert = targeted.certifications.firstOrNull()?.let { localizeCvTerm(it.name, isFrench) }
         val edu = targeted.education?.let { localizeCvTerm(it.degree, isFrench) }
 
+        val isRailOrCivilOffer = offer.tags.any { it.contains("Rail", ignoreCase = true) || it.contains("Chemin de Fer", ignoreCase = true) || it.contains("Travaux Publics", ignoreCase = true) } ||
+                offer.title.contains("ferroviaire", ignoreCase = true) ||
+                offer.title.contains("rail", ignoreCase = true) ||
+                offer.title.contains("sncf", ignoreCase = true) ||
+                offer.title.contains("colas", ignoreCase = true) ||
+                offer.title.contains("systra", ignoreCase = true) ||
+                offer.title.contains("etf", ignoreCase = true) ||
+                offer.title.contains("métreur", ignoreCase = true) ||
+                offer.title.contains("metreur", ignoreCase = true) ||
+                offer.title.contains("estimator", ignoreCase = true) ||
+                offer.title.contains("quantity surveyor", ignoreCase = true) ||
+                offer.title.contains("travaux publics", ignoreCase = true)
+
         val paragraphs = if (isFrench) {
-            listOf(
-                buildString {
-                    when {
-                        targeted.educationDirectFit && !edu.isNullOrBlank() ->
-                            append("Titulaire d'un $edu")
-                        topExp != null ->
-                            append("Fort(e) d'une expérience confirmée en tant que $localizedExpTitle chez ${topExp.company}")
-                        else ->
-                            append("Professionnel(le) spécialisé(e) en $localizedTitle")
-                    }
-                    append(", je souhaite vous soumettre ma candidature pour le poste de ${offer.title} au sein de ${offer.company}.")
-                },
-                "Votre entreprise reconnue dans son secteur constitue un environnement stimulant où je pourrais m'investir pleinement sur les missions clés du poste, tout en contribuant avec rigueur à l'organisation et aux objectifs de vos équipes.",
-                buildString {
-                    if (topExp != null && skillsText.isNotBlank()) {
-                        append("Mon parcours en qualité de $localizedExpTitle chez ${topExp.company} m'a permis de développer une solide maîtrise en $skillsText")
-                    } else if (skillsText.isNotBlank()) {
-                        append("Mes réalisations m'ont permis de consolider des compétences ciblées en $skillsText")
-                    }
-                    if (!topCert.isNullOrBlank()) {
-                        append(", complétée par ma certification en $topCert")
-                    }
-                    append(".")
-                    if (targeted.languages.isNotEmpty()) {
-                        append(" La maîtrise des langues (${targeted.languages.joinToString(", ")}) viendra également appuyer mes échanges au quotidien.")
-                    }
-                }.trim(),
-                "Je serais ravi(e) de vous rencontrer lors d'un entretien pour échanger sur ma contribution au sein de ${offer.company}. Vous trouverez ci-joint mon CV en français détaillant l'ensemble de mon parcours."
-            )
+            if (isRailOrCivilOffer) {
+                listOf(
+                    "Fort de plus de 12 années d'expérience en travaux publics et infrastructures ferroviaires, notamment en qualité d'ingénieur métreur-vérificateur et études de prix (SETIRAIL), je vous soumets avec enthousiasme ma candidature pour le poste de ${offer.title} au sein de ${offer.company}.",
+                    "Votre entreprise, référence incontournable dans le domaine ferroviaire et des grands chantiers de construction, représente un environnement de choix où mobiliser ma rigueur dans le chiffrage, l'établissement des DQE/BPU et la maîtrise des coûts de projets.",
+                    "Mon parcours m'a permis de maîtriser l'ensemble du cycle technique : métrés contradictoires sur plans AutoCAD et Covadis, calculs précis de terrassements et linéaires de voies, vérification des situations de travaux et gestion des sous-traitants sous les normes strictes de conformité.",
+                    "Je serais honoré de convenir d'un entretien pour échanger de vive voix sur ma future contribution au sein de ${offer.company}. Vous trouverez ci-joint mon curriculum vitae détaillant mes réalisations."
+                )
+            } else {
+                listOf(
+                    buildString {
+                        when {
+                            targeted.educationDirectFit && !edu.isNullOrBlank() ->
+                                append("Titulaire d'un $edu")
+                            topExp != null ->
+                                append("Fort(e) d'une expérience confirmée en tant que $localizedExpTitle chez ${topExp.company}")
+                            else ->
+                                append("Professionnel(le) spécialisé(e) en $localizedTitle")
+                        }
+                        append(", je souhaite vous soumettre ma candidature pour le poste de ${offer.title} au sein de ${offer.company}.")
+                    },
+                    "Votre entreprise reconnue dans son secteur constitue un environnement stimulant où je pourrais m'investir pleinement sur les missions clés du poste, tout en contribuant avec rigueur à l'organisation et aux objectifs de vos équipes.",
+                    buildString {
+                        if (topExp != null && skillsText.isNotBlank()) {
+                            append("Mon parcours en qualité de $localizedExpTitle chez ${topExp.company} m'a permis de développer une solide maîtrise en $skillsText")
+                        } else if (skillsText.isNotBlank()) {
+                            append("Mes réalisations m'ont permis de consolider des compétences ciblées en $skillsText")
+                        }
+                        if (!topCert.isNullOrBlank()) {
+                            append(", complétée par ma certification en $topCert")
+                        }
+                        append(".")
+                        if (targeted.languages.isNotEmpty()) {
+                            append(" La maîtrise des langues (${targeted.languages.joinToString(", ")}) viendra également appuyer mes échanges au quotidien.")
+                        }
+                    }.trim(),
+                    "Je serais ravi(e) de vous rencontrer lors d'un entretien pour échanger sur ma contribution au sein de ${offer.company}. Vous trouverez ci-joint mon CV en français détaillant l'ensemble de mon parcours."
+                )
+            }
         } else {
-            listOf(
-                buildString {
-                    when {
-                        targeted.educationDirectFit && !edu.isNullOrBlank() ->
-                            append("Holding a $edu")
-                        topExp != null ->
-                            append("Drawing on my hands-on experience as $localizedExpTitle at ${topExp.company}")
-                        else ->
-                            append("As an experienced $localizedTitle")
-                    }
-                    append(", I am eager to apply for the ${offer.title} position at ${offer.company}.")
-                },
-                "${offer.company} stands out as an organization where I can immediately contribute to your team's objectives while bringing structure, reliability, and operational focus to the role.",
-                buildString {
-                    if (topExp != null && skillsText.isNotBlank()) {
-                        append("In my role as $localizedExpTitle at ${topExp.company}, I developed proven expertise in $skillsText")
-                    } else if (skillsText.isNotBlank()) {
-                        append("Through my background, I have built strong targeted capabilities in $skillsText")
-                    }
-                    if (!topCert.isNullOrBlank()) {
-                        append(", reinforced by my $topCert certification")
-                    }
-                    append(".")
-                    if (targeted.languages.isNotEmpty()) {
-                        append(" My language proficiency (${targeted.languages.joinToString(", ")}) further supports smooth cross-team collaboration.")
-                    }
-                }.trim(),
-                "I would welcome the opportunity to discuss how my background aligns with ${offer.company}'s needs in an interview. Please find my attached English CV for a complete overview of my track record."
-            )
+            if (isRailOrCivilOffer) {
+                listOf(
+                    "With over 12 years of hands-on experience in civil engineering, public works, and railway infrastructure, specializing as a Quantity Surveyor and Cost Estimator (SETIRAIL), I am pleased to submit my application for the ${offer.title} role at ${offer.company}.",
+                    "${offer.company}'s distinguished track record in railway and large-scale infrastructure projects aligns directly with my technical background in project pricing, bill of quantities (BOQ) preparation, and cost optimization.",
+                    "Throughout my career, I have successfully executed end-to-end quantity surveying tasks: detailed AutoCAD and Covadis takeoffs, earthworks and track installation calculations, contractor valuations, and variations pricing under rigorous safety and quality standards.",
+                    "I would welcome the opportunity to discuss how my technical expertise can support ${offer.company}'s upcoming milestones in an interview. Please find my attached resume for a detailed view of my track record."
+                )
+            } else {
+                listOf(
+                    buildString {
+                        when {
+                            targeted.educationDirectFit && !edu.isNullOrBlank() ->
+                                append("Holding a $edu")
+                            topExp != null ->
+                                append("Drawing on my hands-on experience as $localizedExpTitle at ${topExp.company}")
+                            else ->
+                                append("As an experienced $localizedTitle")
+                        }
+                        append(", I am eager to apply for the ${offer.title} position at ${offer.company}.")
+                    },
+                    "${offer.company} stands out as an organization where I can immediately contribute to your team's objectives while bringing structure, reliability, and operational focus to the role.",
+                    buildString {
+                        if (topExp != null && skillsText.isNotBlank()) {
+                            append("In my role as $localizedExpTitle at ${topExp.company}, I developed proven expertise in $skillsText")
+                        } else if (skillsText.isNotBlank()) {
+                            append("Through my background, I have built strong targeted capabilities in $skillsText")
+                        }
+                        if (!topCert.isNullOrBlank()) {
+                            append(", reinforced by my $topCert certification")
+                        }
+                        append(".")
+                        if (targeted.languages.isNotEmpty()) {
+                            append(" My language proficiency (${targeted.languages.joinToString(", ")}) further supports smooth cross-team collaboration.")
+                        }
+                    }.trim(),
+                    "I would welcome the opportunity to discuss how my background aligns with ${offer.company}'s needs in an interview. Please find my attached English CV for a complete overview of my track record."
+                )
+            }
         }
 
         return MldpCoverLetterData(
-            senderName = profile.fullName.ifBlank { "Candidat" },
+            senderName = profile.effectiveFullName(),
             senderAddress = profile.address,
             senderPhone = profile.phone,
             senderEmail = profile.email,
@@ -491,7 +522,7 @@ Reply ONLY with valid pure JSON (no markdown code fences):
             } else {
                 "Thank you in advance for your time and consideration of my application. I look forward to discussing my candidacy in an interview. Yours sincerely,"
             },
-            signatureName = profile.fullName.ifBlank { "Candidat" },
+            signatureName = profile.effectiveFullName(),
             isFrench = isFrench
         )
     }
@@ -568,11 +599,12 @@ Reply ONLY with valid pure JSON (no markdown code fences):
         val bodyTokens = expandedTokens("${offer.title} ${offer.description} ${offer.tags.joinToString(" ")}")
 
         // 1. Pick only the most relevant title segment
-        val titleSegments = profile.title.split("|", "/", "•").map { it.trim() }.filter { it.isNotBlank() }
+        val effTitle = profile.effectiveTitle()
+        val titleSegments = effTitle.split("|", "/", "•").map { it.trim() }.filter { it.isNotBlank() }
         val bestTitle = titleSegments.maxByOrNull { scoreMatch(it, titleTokens, bodyTokens) }
             ?.takeIf { titleSegments.size <= 1 || scoreMatch(it, titleTokens, bodyTokens) > 0 }
             ?: titleSegments.firstOrNull()
-            ?: profile.title
+            ?: effTitle
 
         // 2. Score & filter experiences (omit off-domain roles like Teaching for an HR job)
         val scoredExps = profile.experiences.map { exp ->
@@ -762,10 +794,11 @@ Reply ONLY with valid pure JSON (no markdown code fences):
     suspend fun generateFollowUpEmail(offer: JobOffer, profile: UserProfile): Pair<String, String> {
         val isFr = looksLikeFrenchOffer(offer)
         val targeted = selectTargetedProfile(offer, profile)
+        val effName = profile.effectiveFullName()
         val defaultSubject = if (isFr) {
-            "Relance : Candidature au poste de ${offer.title} - ${profile.fullName}"
+            "Relance : Candidature au poste de ${offer.title} - $effName"
         } else {
-            "Follow-up: Application for ${offer.title} - ${profile.fullName}"
+            "Follow-up: Application for ${offer.title} - $effName"
         }
 
         if (settings.hasAnyAiKey()) {
@@ -780,7 +813,7 @@ Reply ONLY with valid pure JSON (no markdown code fences):
 Rédige un court e-mail de relance courtois, naturel et humain (75 à 110 mots max) en ${if (isFr) "FRANÇAIS" else "ANGLAIS"}.
 $humanizeNote
 Objet suggéré : $defaultSubject
-Candidat : ${profile.fullName}
+Candidat : $effName
 Entreprise : ${offer.company}
 Poste : ${offer.title}
 Atouts principaux ciblés : ${targeted.skills.take(3).joinToString(", ")}
@@ -809,7 +842,7 @@ Votre besoin reste en phase avec mon travail récent en ${targeted.skills.take(3
 Merci par avance pour votre retour, et bonne continuation à votre équipe.
 
 Cordialement,
-${profile.fullName}
+$effName
 ${listOfNotNull(profile.phone.ifBlank { null }, profile.email.ifBlank { null }).joinToString(" | ")}
             """.trim()
         } else {
@@ -823,7 +856,7 @@ My recent work in ${targeted.skills.take(3).joinToString(", ") { localizeCvTerm(
 Thank you for your time.
 
 Best regards,
-${profile.fullName}
+$effName
 ${listOfNotNull(profile.phone.ifBlank { null }, profile.email.ifBlank { null }).joinToString(" | ")}
             """.trim()
         }

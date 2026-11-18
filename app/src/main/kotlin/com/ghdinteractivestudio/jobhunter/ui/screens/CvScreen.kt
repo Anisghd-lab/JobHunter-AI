@@ -378,7 +378,7 @@ fun CvScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = profile.fullName.ifBlank { "Candidat" },
+                                text = profile.effectiveFullName(),
                                 style = Type.titleLarge.bold,
                                 color = Palette.text,
                                 modifier = Modifier.weight(1f)

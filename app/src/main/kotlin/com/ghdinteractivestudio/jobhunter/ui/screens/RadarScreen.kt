@@ -120,12 +120,25 @@ fun RadarScreen(
     val filteredOffers = remember(offers, selectedFilter, searchQuery) {
         offers.filter { offer ->
             val matchesFilter = when (selectedFilter) {
-                "DIRECT_EMAIL" -> offer.recruiterEmail.isNotBlank() && HtmlSanitizer.isValidRecruiterEmail(offer.recruiterEmail)
-                "ALGERIA" -> offer.regionScope == "ALGERIA"
+                "METREUR" -> offer.tags.any { it.contains("MÉTREUR", ignoreCase = true) } ||
+                        offer.title.contains("métreur", ignoreCase = true) ||
+                        offer.title.contains("metreur", ignoreCase = true) ||
+                        offer.title.contains("estimator", ignoreCase = true) ||
+                        offer.title.contains("quantity surveyor", ignoreCase = true) ||
+                        offer.title.contains("études de prix", ignoreCase = true)
+                "RAIL" -> offer.tags.any { it.contains("CHEMIN DE FER", ignoreCase = true) || it.contains("Rail", ignoreCase = true) } ||
+                        offer.title.contains("rail", ignoreCase = true) ||
+                        offer.title.contains("ferroviaire", ignoreCase = true) ||
+                        offer.company.contains("rail", ignoreCase = true) ||
+                        offer.company.contains("sncf", ignoreCase = true) ||
+                        offer.company.contains("alstom", ignoreCase = true) ||
+                        offer.company.contains("systra", ignoreCase = true) ||
+                        offer.company.contains("setirail", ignoreCase = true)
+                "FRANCE" -> offer.regionScope == "FRANCE" || offer.location.contains("France", ignoreCase = true)
+                "CANADA" -> offer.regionScope == "CANADA" || offer.location.contains("Canada", ignoreCase = true)
+                "ALGERIA" -> offer.regionScope == "ALGERIA" || offer.location.contains("Algérie", ignoreCase = true) || offer.location.contains("Algeria", ignoreCase = true)
                 "GULF" -> offer.regionScope == "GULF"
-                "INTERNATIONAL" -> offer.regionScope == "INTERNATIONAL"
-                "REMOTE" -> offer.isRemote || offer.workMode == "REMOTE"
-                "ONSITE" -> !offer.isRemote || offer.workMode == "ONSITE" || offer.workMode == "HYBRID"
+                "DIRECT_EMAIL" -> offer.recruiterEmail.isNotBlank() && HtmlSanitizer.isValidRecruiterEmail(offer.recruiterEmail)
                 "PENDING" -> offer.status != JobStatus.APPLIED && !offer.autoApplied
                 "APPLIED" -> offer.status == JobStatus.APPLIED || offer.autoApplied
                 else -> true
@@ -140,8 +153,8 @@ fun RadarScreen(
             matchesFilter && matchesQuery
         }.sortedWith(
             compareBy<JobOffer> { it.status == JobStatus.APPLIED || it.autoApplied }
-                .thenByDescending { HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
                 .thenByDescending { it.matchScore }
+                .thenByDescending { HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
                 .thenByDescending { it.detectedAt }
         )
     }
@@ -149,9 +162,28 @@ fun RadarScreen(
     val appliedCount = offers.count { it.status == JobStatus.APPLIED || it.autoApplied }
     val pendingCount = offers.size - appliedCount
     val directEmailCount = offers.count { it.recruiterEmail.isNotBlank() && HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
-    val dzCount = offers.count { it.regionScope == "ALGERIA" }
+    val metreurCount = offers.count {
+        it.tags.any { t -> t.contains("MÉTREUR", ignoreCase = true) } ||
+        it.title.contains("métreur", ignoreCase = true) ||
+        it.title.contains("metreur", ignoreCase = true) ||
+        it.title.contains("estimator", ignoreCase = true) ||
+        it.title.contains("quantity surveyor", ignoreCase = true) ||
+        it.title.contains("études de prix", ignoreCase = true)
+    }
+    val railCount = offers.count {
+        it.tags.any { t -> t.contains("CHEMIN DE FER", ignoreCase = true) || t.contains("Rail", ignoreCase = true) } ||
+        it.title.contains("rail", ignoreCase = true) ||
+        it.title.contains("ferroviaire", ignoreCase = true) ||
+        it.company.contains("rail", ignoreCase = true) ||
+        it.company.contains("sncf", ignoreCase = true) ||
+        it.company.contains("alstom", ignoreCase = true) ||
+        it.company.contains("systra", ignoreCase = true) ||
+        it.company.contains("setirail", ignoreCase = true)
+    }
+    val franceCount = offers.count { it.regionScope == "FRANCE" || it.location.contains("France", ignoreCase = true) }
+    val canadaCount = offers.count { it.regionScope == "CANADA" || it.location.contains("Canada", ignoreCase = true) }
+    val dzCount = offers.count { it.regionScope == "ALGERIA" || it.location.contains("Algérie", ignoreCase = true) || it.location.contains("Algeria", ignoreCase = true) }
     val gulfCount = offers.count { it.regionScope == "GULF" }
-    val intlCount = offers.count { it.regionScope == "INTERNATIONAL" }
 
     Column(
         modifier = modifier
@@ -182,7 +214,7 @@ fun RadarScreen(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "RADAR WEB 100% RÉEL",
+                            text = "RADAR TRAVAUX PUBLICS & RAIL",
                             style = Type.mono.bold,
                             color = Palette.emeraldAccent,
                             maxLines = 1,
@@ -202,7 +234,7 @@ fun RadarScreen(
 
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "${offers.size} offres actives · 📧 Email Direct: $directEmailCount · 🇩🇿 DZ: $dzCount · 🏜️ Golfe: $gulfCount · 🌍 Monde: $intlCount",
+                    text = "${offers.size} offres · 🎯 Métreur: $metreurCount · 🚆 Rail: $railCount · 🇫🇷 FR: $franceCount · 🇨🇦 CA: $canadaCount · 🇩🇿 DZ: $dzCount",
                     style = Type.label,
                     color = Palette.secondary
                 )
@@ -212,7 +244,7 @@ fun RadarScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Filtrer poste, email, compétence, wilaya...", style = Type.label) },
+                    placeholder = { Text("Filtrer poste, entreprise, lieu, email...", style = Type.label) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Palette.secondary, modifier = Modifier.size(18.dp)) },
                     singleLine = true,
                     shape = Capsule(),
@@ -222,9 +254,49 @@ fun RadarScreen(
             }
         }
 
+        Spacer(Modifier.height(8.dp))
+
+        // Obsidian Glass Target Banner
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Palette.glassCard, RoundedRectangle(14.dp))
+                .border(1.dp, Palette.cyanNeon.copy(alpha = 0.45f), RoundedRectangle(14.dp))
+                .padding(12.dp)
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Bolt,
+                        contentDescription = null,
+                        tint = Palette.cyanNeon,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "CIBLE : MÉTREUR-VÉRIFICATEUR & ÉTUDES DE PRIX",
+                        style = Type.label.bold.monospaced,
+                        color = Palette.cyanNeon
+                    )
+                }
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "🚆 Travaux Publics & Chemin de Fer · 🇫🇷 France · 🇨🇦 Canada · 🇩🇿 Algérie",
+                    style = Type.label.bold,
+                    color = Palette.emeraldAccent
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "👤 GHEDIRI MOHAMED REDHA · 12+ ans d'expérience TP & Rail (SETIRAIL)",
+                    style = Type.label,
+                    color = Palette.secondary
+                )
+            }
+        }
+
         Spacer(Modifier.height(10.dp))
 
-        // Filter Chips Bar (Tout, Email Direct, Algérie, Golfe GCC, Monde, Présentiel, Remote)
+        // Filter Chips Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -233,14 +305,14 @@ fun RadarScreen(
         ) {
             listOf(
                 "ALL" to "Tout (${offers.size})",
-                "PENDING" to "⚡ À postuler ($pendingCount)",
-                "DIRECT_EMAIL" to "📧 Email Direct ($directEmailCount)",
-                "APPLIED" to "✓ Postulées ($appliedCount)",
+                "METREUR" to "🎯 Métreur ($metreurCount)",
+                "RAIL" to "🚆 Rail & TP ($railCount)",
+                "FRANCE" to "🇫🇷 France ($franceCount)",
+                "CANADA" to "🇨🇦 Canada ($canadaCount)",
                 "ALGERIA" to "🇩🇿 Algérie ($dzCount)",
-                "GULF" to "🏜️ Golfe ($gulfCount)",
-                "INTERNATIONAL" to "🌍 Monde ($intlCount)",
-                "ONSITE" to "🏢 Présentiel",
-                "REMOTE" to "🏠 Remote"
+                "DIRECT_EMAIL" to "📧 Email Direct ($directEmailCount)",
+                "PENDING" to "⚡ À postuler ($pendingCount)",
+                "APPLIED" to "✓ Postulées ($appliedCount)"
             ).forEach { (key, label) ->
                 GlassFilterChip(
                     text = label,
@@ -332,6 +404,20 @@ fun JobOfferCard(
     val dark = LocalDark.current
     var expanded by remember { mutableStateOf(false) }
     val isApplied = offer.status == JobStatus.APPLIED || offer.autoApplied
+    val isMetreur = offer.tags.any { it.contains("MÉTREUR", ignoreCase = true) } ||
+            offer.title.contains("métreur", ignoreCase = true) ||
+            offer.title.contains("metreur", ignoreCase = true) ||
+            offer.title.contains("estimator", ignoreCase = true) ||
+            offer.title.contains("quantity surveyor", ignoreCase = true) ||
+            offer.title.contains("études de prix", ignoreCase = true)
+    val isRail = offer.tags.any { it.contains("CHEMIN DE FER", ignoreCase = true) || it.contains("Rail", ignoreCase = true) } ||
+            offer.title.contains("rail", ignoreCase = true) ||
+            offer.title.contains("ferroviaire", ignoreCase = true) ||
+            offer.company.contains("rail", ignoreCase = true) ||
+            offer.company.contains("sncf", ignoreCase = true) ||
+            offer.company.contains("alstom", ignoreCase = true) ||
+            offer.company.contains("systra", ignoreCase = true) ||
+            offer.company.contains("setirail", ignoreCase = true)
 
     Box(
         modifier = Modifier
@@ -378,10 +464,19 @@ fun JobOfferCard(
                             }
                         }
                     } else {
-                        val regionColor = when (offer.regionScope) {
-                            "ALGERIA" -> Palette.emeraldAccent
-                            "GULF" -> Palette.cyanNeon
+                        val regionColor = when {
+                            offer.regionScope == "FRANCE" || offer.location.contains("France", ignoreCase = true) -> Palette.electricBlue
+                            offer.regionScope == "CANADA" || offer.location.contains("Canada", ignoreCase = true) -> Palette.danger
+                            offer.regionScope == "ALGERIA" || offer.location.contains("Algérie", ignoreCase = true) || offer.location.contains("Algeria", ignoreCase = true) -> Palette.emeraldAccent
+                            offer.regionScope == "GULF" -> Palette.cyanNeon
                             else -> Palette.attention
+                        }
+                        val regionText = when {
+                            offer.regionScope == "FRANCE" || offer.location.contains("France", ignoreCase = true) -> if (offer.isRemote) "🇫🇷 France • Remote" else "🇫🇷 France • Présentiel"
+                            offer.regionScope == "CANADA" || offer.location.contains("Canada", ignoreCase = true) -> if (offer.isRemote) "🇨🇦 Canada • Remote" else "🇨🇦 Canada • Présentiel"
+                            offer.regionScope == "ALGERIA" || offer.location.contains("Algérie", ignoreCase = true) || offer.location.contains("Algeria", ignoreCase = true) -> if (offer.isRemote) "🇩🇿 DZ • Remote" else "🇩🇿 DZ • Présentiel"
+                            offer.regionScope == "GULF" -> if (offer.isRemote) "🏜️ Golfe • Remote" else "🏜️ Golfe • Présentiel"
+                            else -> if (offer.isRemote) "🌍 Remote" else "🌍 Présentiel"
                         }
                         Box(
                             modifier = Modifier
@@ -390,11 +485,7 @@ fun JobOfferCard(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = when (offer.regionScope) {
-                                    "ALGERIA" -> if (offer.isRemote) "🇩🇿 DZ • Remote" else "🇩🇿 DZ • Présentiel"
-                                    "GULF" -> if (offer.isRemote) "🏜️ Golfe • Remote" else "🏜️ Golfe • Présentiel"
-                                    else -> if (offer.isRemote) "🌍 Remote" else "🌍 Présentiel"
-                                },
+                                text = regionText,
                                 style = Type.label.bold,
                                 color = regionColor
                             )
@@ -421,6 +512,40 @@ fun JobOfferCard(
                         style = Type.label.bold,
                         color = formatColor
                     )
+                }
+            }
+
+            if (isMetreur || isRail) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (isMetreur) {
+                        Box(
+                            modifier = Modifier
+                                .background(Palette.cyanNeon.copy(alpha = 0.16f), Capsule())
+                                .border(1.dp, Palette.cyanNeon.copy(alpha = 0.5f), Capsule())
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "🎯 CIBLE : MÉTREUR-VÉRIFICATEUR",
+                                style = Type.label.bold.monospaced,
+                                color = Palette.cyanNeon
+                            )
+                        }
+                    }
+                    if (isRail) {
+                        Box(
+                            modifier = Modifier
+                                .background(Palette.emeraldAccent.copy(alpha = 0.16f), Capsule())
+                                .border(1.dp, Palette.emeraldAccent.copy(alpha = 0.5f), Capsule())
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "🚆 CHEMIN DE FER & TP",
+                                style = Type.label.bold.monospaced,
+                                color = Palette.emeraldAccent
+                            )
+                        }
+                    }
                 }
             }
 
@@ -826,18 +951,19 @@ fun ApplyAssistantDialog(
                 if (offer.recruiterEmail.isNotBlank() && !outcome.sentSilentlyByEmail) {
                     val repo = remember { com.ghdinteractivestudio.jobhunter.data.local.SettingsRepository.getInstance(context) }
                     val appSettings by repo.settings.collectAsState()
-                    val yahooPkg = if (appSettings.preferInstalledYahooApp) appSettings.connectedYahooPackage else ""
+                    val preferredPkg = if (appSettings.isMailAppPreferred()) appSettings.effectiveMailPackage() else ""
+                    val appName = appSettings.effectiveMailAppName()
                     GlassSolidButton(
-                        text = if (yahooPkg.isNotBlank()) "Envoyer via Yahoo Mail" else "Envoyer Email (${offer.recruiterEmail})",
+                        text = if (preferredPkg.isNotBlank()) "Envoyer via $appName" else "Envoyer Email (${offer.recruiterEmail})",
                         icon = Icons.Default.Email,
                         containerColor = Palette.blueSolidBg,
                         onClick = {
                             val directIntent = ApplicationAutomationManager.buildEmailComposeIntent(
                                 context = context,
                                 offer = offer,
-                                preferredPackage = yahooPkg
+                                preferredPackage = preferredPkg
                             )
-                            val openedDirect = if (yahooPkg.isNotBlank()) {
+                            val openedDirect = if (preferredPkg.isNotBlank()) {
                                 runCatching { context.startActivity(directIntent) }.isSuccess
                             } else false
                             if (!openedDirect) {

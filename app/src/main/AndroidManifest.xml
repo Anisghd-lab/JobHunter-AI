@@ -22,6 +22,7 @@
     <queries>
         <package android:name="com.yahoo.mobile.client.android.mail" />
         <package android:name="com.google.android.gm" />
+        <package android:name="com.microsoft.office.outlook" />
         <package android:name="com.android.email" />
         <intent>
             <action android:name="android.intent.action.SEND_MULTIPLE" />
@@ -32,6 +33,7 @@
     <application
         android:name=".JobHunterApp"
         android:allowBackup="true"
+        android:usesCleartextTraffic="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"

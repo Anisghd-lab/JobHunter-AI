@@ -81,6 +81,9 @@ data class AppSettings(
     val followUpDelayDays: Int = 5,
     val preferInstalledYahooApp: Boolean = false,
     val connectedYahooPackage: String = "",
+    val preferInstalledMailApp: Boolean = false,
+    val connectedMailAppPackage: String = "",
+    val connectedMailAppName: String = "",
     val smtpAuthPaused: Boolean = false,
     val autoApplyEmailOnly: Boolean = false,
     val autoApplyMaxPerCycle: Int = 12,
@@ -121,6 +124,45 @@ data class AppSettings(
             (senderEmail.isNotBlank() && gmailOAuthToken.isNotBlank())
 
     fun canSendSilently(): Boolean = hasEmailCredentials() && !smtpAuthPaused
+
+    fun effectiveMailPackage(): String =
+        connectedMailAppPackage.ifBlank { connectedYahooPackage }
+
+    fun effectiveMailAppName(): String = when {
+        connectedMailAppName.isNotBlank() -> connectedMailAppName
+        effectiveMailPackage().contains("gm") -> "Gmail"
+        effectiveMailPackage().contains("yahoo") -> "Yahoo Mail"
+        effectiveMailPackage().contains("outlook") -> "Outlook"
+        senderEmail.contains("@gmail.", ignoreCase = true) -> "Gmail"
+        senderEmail.contains("@yahoo.", ignoreCase = true) -> "Yahoo Mail"
+        senderEmail.contains("@outlook.", ignoreCase = true) || senderEmail.contains("@hotmail.", ignoreCase = true) -> "Outlook"
+        else -> "Application Email"
+    }
+
+    fun isMailAppPreferred(): Boolean =
+        preferInstalledMailApp || preferInstalledYahooApp || effectiveMailPackage().isNotBlank()
+
+    fun getAppPasswordHelpUrl(): String {
+        val h = smtpHost.lowercase()
+        val e = senderEmail.lowercase()
+        return when {
+            h.contains("gmail") || e.contains("@gmail.") -> "https://myaccount.google.com/apppasswords"
+            h.contains("yahoo") || e.contains("@yahoo.") -> "https://login.yahoo.com/myaccount/security"
+            h.contains("outlook") || h.contains("office365") || e.contains("@outlook.") || e.contains("@hotmail.") -> "https://account.live.com/proofs/manage/additional"
+            else -> "https://myaccount.google.com/apppasswords"
+        }
+    }
+
+    fun getProviderDisplayName(): String {
+        val h = smtpHost.lowercase()
+        val e = senderEmail.lowercase()
+        return when {
+            h.contains("gmail") || e.contains("@gmail.") -> "Gmail"
+            h.contains("yahoo") || e.contains("@yahoo.") -> "Yahoo"
+            h.contains("outlook") || h.contains("office365") || e.contains("@outlook.") || e.contains("@hotmail.") -> "Outlook"
+            else -> "SMTP"
+        }
+    }
 }
 
 class SettingsRepository private constructor(context: Context) {
@@ -186,6 +228,9 @@ class SettingsRepository private constructor(context: Context) {
             followUpDelayDays = prefs.getInt("follow_up_days", 5),
             preferInstalledYahooApp = prefs.getBoolean("prefer_yahoo_app", false),
             connectedYahooPackage = prefs.getString("connected_yahoo_pkg", "") ?: "",
+            preferInstalledMailApp = prefs.getBoolean("prefer_mail_app", prefs.getBoolean("prefer_yahoo_app", false)),
+            connectedMailAppPackage = prefs.getString("connected_mail_pkg", prefs.getString("connected_yahoo_pkg", "") ?: "") ?: "",
+            connectedMailAppName = prefs.getString("connected_mail_name", "") ?: "",
             smtpAuthPaused = if (hasPwd) false else prefs.getBoolean("smtp_auth_paused", false),
             autoApplyEmailOnly = prefs.getBoolean("auto_apply_email_only", false),
             autoApplyMaxPerCycle = prefs.getInt("auto_apply_max_cycle", 12),
@@ -225,6 +270,9 @@ class SettingsRepository private constructor(context: Context) {
             putInt("follow_up_days", next.followUpDelayDays)
             putBoolean("prefer_yahoo_app", next.preferInstalledYahooApp)
             putString("connected_yahoo_pkg", next.connectedYahooPackage.trim())
+            putBoolean("prefer_mail_app", next.preferInstalledMailApp)
+            putString("connected_mail_pkg", next.connectedMailAppPackage.trim())
+            putString("connected_mail_name", next.connectedMailAppName.trim())
             putBoolean("smtp_auth_paused", next.smtpAuthPaused)
             putBoolean("auto_apply_email_only", next.autoApplyEmailOnly)
             putInt("auto_apply_max_cycle", next.autoApplyMaxPerCycle)

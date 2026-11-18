@@ -584,11 +584,12 @@ private suspend fun fetchLatestOtpOrConfirmationLink(
  * Never clicks buttons, submits forms, or interacts with CAPTCHA / checkbox widgets.
  */
 private fun buildVisibleFormFillJs(profile: UserProfile, offer: JobOffer, effectiveEmail: String): String {
-    val parts = profile.fullName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+    val cleanName = profile.effectiveFullName()
+    val parts = cleanName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
     val firstName = parts.dropLast(1).joinToString(" ").ifBlank { parts.firstOrNull().orEmpty() }
     val lastName = parts.lastOrNull().orEmpty()
     val payload = JSONObject().apply {
-        put("fullName", profile.fullName)
+        put("fullName", cleanName)
         put("firstName", firstName)
         put("lastName", lastName)
         put("email", effectiveEmail)

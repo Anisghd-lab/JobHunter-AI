@@ -184,7 +184,7 @@ class JobHunterForegroundService : Service() {
             val manager = getSystemService(NotificationManager::class.java)
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "JobHunter 24/7 Agent",
+                "JOB4REDHA 24/7 Agent",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Maintient l'agent autonome actif pour trouver et analyser des offres d'emploi réelles"

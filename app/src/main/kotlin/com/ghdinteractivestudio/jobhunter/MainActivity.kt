@@ -112,14 +112,38 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             profileDao.getProfileFlow().collect { entity ->
                 if (entity != null) {
-                    val domainProfile = entity.toDomain().migrateLegacySlotIfNeeded()
+                    var domainProfile = entity.toDomain().migrateLegacySlotIfNeeded()
+                    val corpus = domainProfile.combinedSearchCorpus().ifBlank { domainProfile.rawCvContent }
+                    val isCorruptName = domainProfile.fullName.trim().equals("Curriculum vitæ", ignoreCase = true) ||
+                            domainProfile.fullName.trim().equals("Curriculum vitae", ignoreCase = true) ||
+                            domainProfile.fullName.trim().equals("CV", ignoreCase = true)
+                    val isCorruptTitle = domainProfile.title.trim().equals("GHEDIRI MOHAMED REDHA", ignoreCase = true) ||
+                            domainProfile.title.isBlank()
+
+                    if ((isCorruptName || isCorruptTitle) && corpus.isNotBlank()) {
+                        val repaired = CvParser.buildProfileFromText(
+                            rawText = corpus,
+                            fileName = domainProfile.sourceCvFileName.ifBlank { "CV.pdf" },
+                            format = domainProfile.sourceCvFormat.ifBlank { "PDF" }
+                        )
+                        domainProfile = domainProfile.copy(
+                            fullName = if (isCorruptName && repaired.fullName.isNotBlank()) repaired.fullName else domainProfile.fullName,
+                            title = if (isCorruptTitle && repaired.title.isNotBlank()) repaired.title else domainProfile.title,
+                            skills = (domainProfile.skills + repaired.skills).distinct(),
+                            experiences = if (domainProfile.experiences.isEmpty()) repaired.experiences else domainProfile.experiences,
+                            educations = if (domainProfile.educations.isEmpty()) repaired.educations else domainProfile.educations
+                        )
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            profileDao.saveProfile(UserProfileEntity.fromDomain(domainProfile))
+                        }
+                    }
                     userProfileState.value = domainProfile
                     autoConfigureEmailPresetIfBlank(domainProfile, settingsRepo)
                 }
             }
         }
 
-        // Purge expired offers immediately and perform initial scan only if DB is empty or stale (> 10 min)
+        // Purge expired offers immediately and perform initial scan only if DB is empty, stale (> 10 min) or contains irrelevant legacy offers
         lifecycleScope.launch(Dispatchers.IO) {
             val now = System.currentTimeMillis()
             val minPub = now - (DeadlineParser.DEFAULT_MAX_OFFER_AGE_DAYS * 86_400_000L)
@@ -127,9 +151,12 @@ class MainActivity : ComponentActivity() {
 
             val currentOffers = offerDao.getAllOffers().firstOrNull() ?: emptyList()
             val lastTs = settingsRepo.settings.value.lastScanTimestamp
-            if (currentOffers.isEmpty() || (now - lastTs) > 10 * 60_000L) {
-                val existingProfile = profileDao.getProfile()?.toDomain()
-                handleRefreshScan(existingProfile, settingsRepo, showToast = false)
+            val profile = profileDao.getProfile()?.toDomain()
+            val hasIrrelevantLegacyOffers = currentOffers.any { o ->
+                o.matchScore < 50 || o.title.contains("Ressources Humaines", ignoreCase = true) || o.title.contains("Admin Assistant", ignoreCase = true)
+            }
+            if (currentOffers.isEmpty() || hasIrrelevantLegacyOffers || (now - lastTs) > 10 * 60_000L) {
+                handleRefreshScan(profile, settingsRepo, showToast = false)
             }
         }
 
@@ -473,15 +500,34 @@ class MainActivity : ComponentActivity() {
 
     private fun autoConfigureEmailPresetIfBlank(profile: UserProfile, settingsRepo: SettingsRepository) {
         val current = settingsRepo.settings.value
-        if (current.senderEmail.isBlank() && profile.email.isNotBlank()) {
-            val lower = profile.email.lowercase()
+        val email = if (current.senderEmail.isNotBlank()) current.senderEmail else profile.email
+        if (email.isNotBlank()) {
+            val lower = email.lowercase()
             val (host, port) = when {
                 lower.contains("@yahoo.") -> "smtp.mail.yahoo.com" to 465
                 lower.contains("@outlook.") || lower.contains("@hotmail.") || lower.contains("@live.") -> "smtp-mail.outlook.com" to 587
                 else -> "smtp.gmail.com" to 465
             }
-            settingsRepo.update {
-                it.copy(senderEmail = profile.email, smtpHost = host, smtpPort = port)
+            val (pkg, appName) = when {
+                lower.contains("@yahoo.") -> "com.yahoo.mobile.client.android.mail" to "Yahoo Mail"
+                lower.contains("@outlook.") || lower.contains("@hotmail.") || lower.contains("@live.") -> "com.microsoft.office.outlook" to "Outlook"
+                else -> "com.google.android.gm" to "Gmail"
+            }
+            val needEmail = current.senderEmail.isBlank()
+            val needApp = current.connectedMailAppPackage.isBlank() || (current.connectedMailAppPackage.contains("yahoo") && !lower.contains("@yahoo."))
+            if (needEmail || needApp) {
+                settingsRepo.update {
+                    it.copy(
+                        senderEmail = if (needEmail) email else it.senderEmail,
+                        smtpHost = if (needEmail || it.smtpHost.isBlank()) host else it.smtpHost,
+                        smtpPort = if (needEmail || it.smtpPort == 0) port else it.smtpPort,
+                        preferInstalledMailApp = true,
+                        connectedMailAppPackage = pkg,
+                        connectedMailAppName = appName,
+                        preferInstalledYahooApp = pkg.contains("yahoo"),
+                        connectedYahooPackage = if (pkg.contains("yahoo")) pkg else ""
+                    )
+                }
             }
         }
     }
@@ -689,18 +735,25 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun handleReanalyzeCvWithAi(settingsRepo: SettingsRepository) = withContext(Dispatchers.IO) {
         val current = userProfileState.value.migrateLegacySlotIfNeeded()
-        val corpus = current.combinedSearchCorpus()
+        val corpus = current.combinedSearchCorpus().ifBlank { current.rawCvContent }
         if (corpus.isBlank()) return@withContext
         isAnalyzingCvState.value = true
         runCatching {
             val settings = settingsRepo.settings.value
             val engine = CvTailoringEngine(settings)
-            val parsed = engine.parseCvWithIntelligence(corpus).getOrThrow()
+            val aiParsed = if (settings.hasAnyAiKey()) {
+                engine.parseCvWithIntelligence(corpus).getOrNull()
+            } else null
+            val base = aiParsed ?: CvParser.buildProfileFromText(
+                rawText = corpus,
+                fileName = current.sourceCvFileName.ifBlank { "CV.pdf" },
+                format = current.sourceCvFormat.ifBlank { "PDF" }
+            )
 
-            val updated = parsed.copy(
-                fullName = parsed.fullName.ifBlank { current.fullName },
-                email = parsed.email.ifBlank { current.email },
-                phone = parsed.phone.ifBlank { current.phone },
+            val updated = base.copy(
+                fullName = base.fullName.ifBlank { current.fullName },
+                email = base.email.ifBlank { current.email },
+                phone = base.phone.ifBlank { current.phone },
                 sourceCvFileName = current.sourceCvFileName,
                 sourceCvFormat = current.sourceCvFormat,
                 sourceCvPath = current.sourceCvPath,
@@ -715,11 +768,16 @@ class MainActivity : ComponentActivity() {
             userProfileState.value = updated
 
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "Analyse IA (EN/FR) mise à jour !", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@MainActivity,
+                    if (aiParsed != null) "Analyse IA (EN/FR) mise à jour !" else "Profil recalculé depuis le CV source !",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
+            handleRefreshScan(updated, settingsRepo, showToast = false)
         }.onFailure { err ->
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "Erreur IA : ${err.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "Erreur analyse CV : ${err.message}", Toast.LENGTH_LONG).show()
             }
         }
         isAnalyzingCvState.value = false

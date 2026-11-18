@@ -645,18 +645,61 @@ fun AgentScreen(
 
                 Spacer(Modifier.height(8.dp))
 
+                // Detect installed email applications on device (Gmail, Yahoo, Outlook)
+                val detectedMailApps = remember(context) {
+                    val pm = context.packageManager
+                    val candidates = listOf(
+                        Triple("Gmail", "com.google.android.gm", "https://myaccount.google.com/apppasswords"),
+                        Triple("Yahoo Mail", "com.yahoo.mobile.client.android.mail", "https://login.yahoo.com/myaccount/security"),
+                        Triple("Outlook", "com.microsoft.office.outlook", "https://account.live.com/proofs/manage/additional")
+                    )
+                    candidates.filter { (_, pkg, _) ->
+                        runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess
+                    }
+                }
+
+                if (detectedMailApps.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Palette.plateBackground, RoundedRectangle(8.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = "✓ Appli(s) Email détectée(s) : ${detectedMailApps.joinToString { it.first }}",
+                            style = Type.label.bold,
+                            color = Palette.emeraldAccent
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+
                 // Quick SMTP Presets
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(
-                        Triple("Yahoo", "smtp.mail.yahoo.com", 465),
                         Triple("Gmail", "smtp.gmail.com", 465),
+                        Triple("Yahoo", "smtp.mail.yahoo.com", 465),
                         Triple("Outlook", "smtp-mail.outlook.com", 587)
                     ).forEach { (label, host, port) ->
+                        val isSelected = settings.smtpHost == host
                         GlassFilterChip(
                             text = label,
-                            selected = settings.smtpHost == host,
+                            selected = isSelected,
                             selectedColor = Palette.blueSolidBg,
-                            onClick = { settingsRepo.update { it.copy(smtpHost = host, smtpPort = port) } }
+                            onClick = {
+                                val matchApp = detectedMailApps.firstOrNull { it.first.contains(label, ignoreCase = true) }
+                                settingsRepo.update {
+                                    it.copy(
+                                        smtpHost = host,
+                                        smtpPort = port,
+                                        connectedMailAppPackage = matchApp?.second ?: it.connectedMailAppPackage,
+                                        connectedMailAppName = matchApp?.first ?: label,
+                                        preferInstalledMailApp = matchApp != null,
+                                        preferInstalledYahooApp = matchApp?.second?.contains("yahoo") == true,
+                                        connectedYahooPackage = if (matchApp?.second?.contains("yahoo") == true) matchApp.second else it.connectedYahooPackage
+                                    )
+                                }
+                            }
                         )
                     }
                 }
@@ -665,8 +708,29 @@ fun AgentScreen(
 
                 OutlinedTextField(
                     value = settings.senderEmail,
-                    onValueChange = { v -> settingsRepo.update { it.copy(senderEmail = v) } },
-                    label = { Text("Votre adresse email (ex: nom@yahoo.com)") },
+                    onValueChange = { v ->
+                        val lower = v.lowercase()
+                        val detectedPreset = when {
+                            lower.contains("@gmail.") -> Triple("smtp.gmail.com", 465, "Gmail")
+                            lower.contains("@yahoo.") -> Triple("smtp.mail.yahoo.com", 465, "Yahoo Mail")
+                            lower.contains("@outlook.") || lower.contains("@hotmail.") -> Triple("smtp-mail.outlook.com", 587, "Outlook")
+                            else -> null
+                        }
+                        val matchingApp = detectedPreset?.let { preset ->
+                            detectedMailApps.firstOrNull { it.first.contains(preset.third.take(5), ignoreCase = true) }
+                        }
+                        settingsRepo.update { s ->
+                            s.copy(
+                                senderEmail = v,
+                                smtpHost = detectedPreset?.first ?: s.smtpHost,
+                                smtpPort = detectedPreset?.second ?: s.smtpPort,
+                                connectedMailAppPackage = matchingApp?.second ?: s.connectedMailAppPackage,
+                                connectedMailAppName = matchingApp?.first ?: s.connectedMailAppName,
+                                preferInstalledMailApp = matchingApp != null || s.preferInstalledMailApp
+                            )
+                        }
+                    },
+                    label = { Text("Votre adresse email (ex: nom@gmail.com)") },
                     singleLine = true,
                     colors = glassFieldColors(),
                     modifier = Modifier.fillMaxWidth()
@@ -690,12 +754,12 @@ fun AgentScreen(
                     onValueChange = { v ->
                         settingsRepo.update { it.copy(smtpPassword = v, smtpAuthPaused = false) }
                     },
-                    label = { Text("Mot de passe d'application (16 car.)") },
+                    label = { Text("Mot de passe d'application (16 car. ${settings.getProviderDisplayName()})") },
                     trailingIcon = if (settings.smtpPassword.isNotBlank()) {
                         {
                             IconButton(onClick = {
                                 settingsRepo.update { it.copy(smtpPassword = "", smtpAuthPaused = false) }
-                                emailTestMsg = "Mot de passe effacé — mode Appli Yahoo Mail prêt."
+                                emailTestMsg = "Mot de passe effacé — mode Appli ${settings.effectiveMailAppName()} prêt."
                             }) {
                                 Icon(Icons.Default.Close, contentDescription = "Effacer", tint = Palette.secondary)
                             }
@@ -772,23 +836,19 @@ fun AgentScreen(
 
                 Spacer(Modifier.height(10.dp))
 
-                val yahooPackage = "com.yahoo.mobile.client.android.mail"
-                val isYahooInstalled = remember(context) {
-                    runCatching { context.packageManager.getPackageInfo(yahooPackage, 0) }.isSuccess
-                }
-
-                // Live Email Test Button (tests SMTP when App Password entered, or Yahoo App binding when App Mode active)
+                // Live Email Test Button (tests SMTP when App Password entered, or installed Email App binding)
                 GlassSolidButton(
-                    text = if (isTestingEmail) "Test connexion Email..." else "Tester Connexion Email",
+                    text = if (isTestingEmail) "Test connexion Email..." else "Tester Connexion Email (${settings.getProviderDisplayName()})",
                     icon = Icons.Default.CheckCircle,
                     containerColor = Palette.blueSolidBg,
                     isLoading = isTestingEmail,
                     onClick = {
+                        val hasInstalledApp = detectedMailApps.any { it.second == settings.effectiveMailPackage() } || detectedMailApps.isNotEmpty()
                         if (settings.smtpPassword.isBlank()) {
-                            if (settings.preferInstalledYahooApp && isYahooInstalled) {
-                                emailTestMsg = "✓ Appli Yahoo Mail installée & liée (${settings.senderEmail}). L'envoi ouvrira Yahoo Mail pré-rempli en 1 clic (ajoutez un Mot de passe d'application 16 car. ci-dessus uniquement pour l'envoi 100 % silencieux)."
+                            if (hasInstalledApp) {
+                                emailTestMsg = "✓ Mode ${settings.effectiveMailAppName()} actif (${settings.senderEmail}). Candidature en 1 clic pré-remplie avec CV & Lettre (ajoutez un Mot de passe d'application 16 car. ${settings.getProviderDisplayName()} pour l'envoi 100% silencieux sans confirmation)."
                             } else {
-                                emailTestMsg = "✗ Saisissez un Mot de passe d'application Yahoo 16 lettres OU appuyez sur « Connecter Appli Yahoo »."
+                                emailTestMsg = "✗ Saisissez un Mot de passe d'application ${settings.getProviderDisplayName()} 16 lettres OU appuyez sur « Lier Appli »."
                             }
                             return@GlassSolidButton
                         }
@@ -826,60 +886,73 @@ fun AgentScreen(
 
                 Spacer(Modifier.height(8.dp))
 
-                val yahooAccountPicker = rememberLauncherForActivityResult(
+                val emailAccountPicker = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
                 ) { result ->
                     val pickedName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)?.trim().orEmpty()
                     if (pickedName.isNotBlank()) {
+                        val matched = detectedMailApps.firstOrNull { pickedName.lowercase().contains(it.first.take(4).lowercase()) }
+                            ?: detectedMailApps.firstOrNull()
                         settingsRepo.update {
                             it.copy(
                                 senderEmail = pickedName,
-                                preferInstalledYahooApp = true,
-                                connectedYahooPackage = if (isYahooInstalled) yahooPackage else ""
+                                preferInstalledMailApp = true,
+                                connectedMailAppPackage = matched?.second ?: it.connectedMailAppPackage,
+                                connectedMailAppName = matched?.first ?: it.connectedMailAppName,
+                                preferInstalledYahooApp = matched?.second?.contains("yahoo") == true,
+                                connectedYahooPackage = if (matched?.second?.contains("yahoo") == true) matched.second else ""
                             )
                         }
-                        emailTestMsg = "✓ Compte '$pickedName' lié${if (isYahooInstalled) " avec l'appli Yahoo Mail" else ""} !"
-                    } else if (isYahooInstalled) {
+                        emailTestMsg = "✓ Compte '$pickedName' lié avec ${settings.effectiveMailAppName()} !"
+                    } else if (detectedMailApps.isNotEmpty()) {
+                        val firstApp = detectedMailApps.first()
                         settingsRepo.update {
                             it.copy(
-                                preferInstalledYahooApp = true,
-                                connectedYahooPackage = yahooPackage
+                                preferInstalledMailApp = true,
+                                connectedMailAppPackage = firstApp.second,
+                                connectedMailAppName = firstApp.first,
+                                preferInstalledYahooApp = firstApp.second.contains("yahoo"),
+                                connectedYahooPackage = if (firstApp.second.contains("yahoo")) firstApp.second else ""
                             )
                         }
-                        emailTestMsg = "✓ Appli Yahoo Mail détectée et définie pour les envois directs (contourne SMTP 535)."
+                        emailTestMsg = "✓ Application ${firstApp.first} liée pour les envois directs en 1 clic."
                     }
                 }
 
-                // Dual Uniform Buttons: Connect Installed Yahoo App OR Generate Yahoo App Password
+                // Dual Uniform Buttons: Connect Installed Email App OR Generate App Password (Provider-specific)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val isLinked = settings.isMailAppPreferred() && settings.effectiveMailPackage().isNotBlank()
                     GlassSoftButton(
-                        text = if (settings.preferInstalledYahooApp && isYahooInstalled) "✓ Yahoo App Liée" else "Connecter Appli Yahoo",
+                        text = if (isLinked) "✓ ${settings.effectiveMailAppName()} Liée" else "Lier ${settings.effectiveMailAppName()}",
                         icon = Icons.Default.Link,
                         accentColor = Palette.emeraldAccent,
                         height = 40.dp,
                         onClick = {
-                            if (!isYahooInstalled) {
-                                emailTestMsg = "✗ Application Yahoo Mail non détectée sur l'appareil."
-                                return@GlassSoftButton
-                            }
-                            settingsRepo.update {
-                                it.copy(
-                                    smtpHost = "smtp.mail.yahoo.com",
-                                    smtpPort = 465,
-                                    preferInstalledYahooApp = true,
-                                    connectedYahooPackage = yahooPackage
-                                )
-                            }
-                            runCatching {
-                                val pickerIntent = AccountManager.newChooseAccountIntent(
-                                    null, null, null, null, null, null, null
-                                )
-                                yahooAccountPicker.launch(pickerIntent)
-                            }.onFailure {
-                                emailTestMsg = "✓ Appli Yahoo Mail installée et liée pour les envois pré-remplis."
+                            val targetApp = detectedMailApps.firstOrNull { it.first.equals(settings.getProviderDisplayName(), ignoreCase = true) }
+                                ?: detectedMailApps.firstOrNull()
+                            if (targetApp != null) {
+                                settingsRepo.update {
+                                    it.copy(
+                                        preferInstalledMailApp = true,
+                                        connectedMailAppPackage = targetApp.second,
+                                        connectedMailAppName = targetApp.first,
+                                        preferInstalledYahooApp = targetApp.second.contains("yahoo"),
+                                        connectedYahooPackage = targetApp.second
+                                    )
+                                }
+                                emailTestMsg = "✓ Application ${targetApp.first} liée avec succès pour les envois directs en 1 clic !"
+                            } else {
+                                runCatching {
+                                    val pickerIntent = AccountManager.newChooseAccountIntent(
+                                        null, null, null, null, null, null, null
+                                    )
+                                    emailAccountPicker.launch(pickerIntent)
+                                }.onFailure {
+                                    emailTestMsg = "✓ Envoi direct configuré via le sélecteur d'applications email."
+                                }
                             }
                         },
                         modifier = Modifier.weight(1f)
@@ -893,7 +966,7 @@ fun AgentScreen(
                         onClick = {
                             runCatching {
                                 context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse("https://login.yahoo.com/myaccount/security"))
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(settings.getAppPasswordHelpUrl()))
                                 )
                             }
                         },
@@ -918,16 +991,17 @@ fun AgentScreen(
                 }
 
                 Spacer(Modifier.height(6.dp))
+                val isMailLinked = settings.isMailAppPreferred() && settings.effectiveMailPackage().isNotBlank()
                 Text(
                     text = when {
                         settings.canSendSilently() -> "✓ Envoi silencieux SMTP & suivi IMAP actifs."
-                        settings.smtpAuthPaused -> "⚠️ SMTP mis en pause suite à une erreur 535 (utilisez un App Password 16 car. valide, ou envoyez via Appli Yahoo Mail ci-dessus)."
-                        settings.preferInstalledYahooApp && isYahooInstalled -> "✓ Mode Appli Yahoo Mail lié : chaque dossier préparé s'ouvre en 1 clic dans Yahoo Mail."
-                        else -> "Astuce Yahoo : sans Mot de passe d'application (16 car.), appuyez sur « Connecter Appli Yahoo » pour envoyer via Yahoo Mail sans erreur 535."
+                        settings.smtpAuthPaused -> "⚠️ SMTP mis en pause suite à une erreur 535 (utilisez un App Password 16 car. ${settings.getProviderDisplayName()}, ou envoyez via ${settings.effectiveMailAppName()})."
+                        isMailLinked -> "✓ Mode Appli ${settings.effectiveMailAppName()} lié : chaque dossier préparé s'ouvre en 1 clic dans ${settings.effectiveMailAppName()}."
+                        else -> "Astuce ${settings.getProviderDisplayName()} : sans Mot de passe d'application (16 car.), appuyez sur « Lier ${settings.effectiveMailAppName()} » pour envoyer via l'application sans erreur 535."
                     },
                     style = Type.label,
                     color = when {
-                        settings.canSendSilently() || (settings.preferInstalledYahooApp && isYahooInstalled) -> Palette.emeraldAccent
+                        settings.canSendSilently() || isMailLinked -> Palette.emeraldAccent
                         settings.smtpAuthPaused -> Palette.attention
                         else -> Palette.secondary
                     }

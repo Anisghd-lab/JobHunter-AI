@@ -116,7 +116,7 @@ object ApplicationAutomationManager {
         settings: AppSettings,
         scanner: JobScanner
     ): Result<JobOffer> = withContext(Dispatchers.IO) {
-        if (profile.rawCvContent.isBlank() || profile.fullName.isBlank()) {
+        if (profile.rawCvContent.isBlank() || profile.effectiveFullName().isBlank()) {
             return@withContext Result.failure(
                 IllegalStateException("Veuillez d'abord importer votre vrai CV dans l'onglet Mon CV.")
             )
@@ -241,7 +241,7 @@ object ApplicationAutomationManager {
         val mldpLetter = engine.generateMldpCoverLetter(liveOffer, migratedProfile)
         val coverLetter = mldpLetter.toPlainText()
 
-        val safeName = migratedProfile.fullName.ifBlank { "Candidat" }
+        val safeName = migratedProfile.effectiveFullName()
             .replace(Regex("[^a-zA-Z0-9_-]"), "_")
         val safeCompany = offer.company.ifBlank { "Entreprise" }
             .replace(Regex("[^a-zA-Z0-9_-]"), "_")
@@ -272,7 +272,7 @@ object ApplicationAutomationManager {
         } else {
             val tailored = engine.tailorCvContent(liveOffer, migratedProfile).getOrNull()
             val cvSections = buildCvSections(migratedProfile, tailored)
-            val cvHeaderTitle = "${migratedProfile.fullName.ifBlank { "CV" }} — ${tailored?.targetTitle?.ifBlank { migratedProfile.title } ?: migratedProfile.title}"
+            val cvHeaderTitle = "${migratedProfile.effectiveFullName()} — ${tailored?.targetTitle?.ifBlank { migratedProfile.effectiveTitle() } ?: migratedProfile.effectiveTitle()}"
 
             if (useDocx) {
                 File(outputDir, "CV_${safeName}_${langTag}_${uniqueSuffix}.docx").also { f ->
@@ -346,26 +346,26 @@ object ApplicationAutomationManager {
                             .update { it.copy(smtpAuthPaused = true) }
                     }
                     needsEmailIntent = true
-                    channelLabel = if (settings.preferInstalledYahooApp) {
-                        "Prêt via Appli Yahoo Mail ($targetEmail)"
+                    channelLabel = if (settings.isMailAppPreferred()) {
+                        "Prêt via ${settings.effectiveMailAppName()} ($targetEmail)"
                     } else {
                         "Email prêt ($targetEmail) — Erreur SMTP"
                     }
-                    resultMessage = if (settings.preferInstalledYahooApp) {
-                        "Dossier prêt ($cvKindLabel + Lettre MLDP) — touchez « Envoyer via Yahoo Mail » !"
+                    resultMessage = if (settings.isMailAppPreferred()) {
+                        "Dossier prêt ($cvKindLabel + Lettre MLDP) — touchez « Envoyer via ${settings.effectiveMailAppName()} » !"
                     } else {
                         "Échec SMTP (${errMsg.take(55)}) — ouvrez l'appli Email."
                     }
                 }
             } else {
                 needsEmailIntent = true
-                channelLabel = if (settings.preferInstalledYahooApp) {
-                    "Prêt via Appli Yahoo Mail ($targetEmail)"
+                channelLabel = if (settings.isMailAppPreferred()) {
+                    "Prêt via ${settings.effectiveMailAppName()} ($targetEmail)"
                 } else {
                     "Email prêt ($targetEmail)"
                 }
-                resultMessage = if (settings.preferInstalledYahooApp) {
-                    "$cvKindLabel & Lettre MLDP prêts — touchez « Envoyer via Yahoo Mail » !"
+                resultMessage = if (settings.isMailAppPreferred()) {
+                    "$cvKindLabel & Lettre MLDP prêts — touchez « Envoyer via ${settings.effectiveMailAppName()} » !"
                 } else {
                     "$cvKindLabel & Lettre MLDP prêts pour $targetEmail !"
                 }
@@ -542,7 +542,7 @@ object ApplicationAutomationManager {
         profile: UserProfile,
         isFrench: Boolean
     ): String {
-        val cleanName = profile.fullName.ifBlank { "Candidat" }
+        val cleanName = profile.effectiveFullName()
         val phoneLine = profile.phone.takeIf { it.isNotBlank() }?.let { "Tél : $it\n" }.orEmpty()
         val emailLine = profile.email.takeIf { it.isNotBlank() }?.let { "Email : $it" }.orEmpty()
 
@@ -671,16 +671,20 @@ object ApplicationAutomationManager {
             .toMutableSet()
 
         // Re-score non-AI cached rows with latest domain guard so out-of-profile tech/medical titles drop out immediately
-        val minEligibilityScore = (initialSettings.autoApplyMinScore - 15).coerceAtLeast(40)
+        val minEligibilityScore = initialSettings.autoApplyMinScore.coerceAtLeast(55)
         val rawCandidates = dao.getTopAutoApplyCandidates(limit = 150)
             .map { entity ->
                 val domain = entity.toDomain()
                 if (domain.aiReasoning.isBlank()) scanner.rescoreWithProfile(domain, migratedProfile) else domain
             }
-            .filter { !DeadlineParser.isExpiredOrStale(it, now) && (it.matchScore >= minEligibilityScore || HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail)) }
+            .filter {
+                !DeadlineParser.isExpiredOrStale(it, now) &&
+                it.matchScore >= minEligibilityScore &&
+                it.aiVerdict != "NON_ADAPTE"
+            }
             .sortedWith(
-                compareByDescending<JobOffer> { HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
-                    .thenByDescending { it.matchScore }
+                compareByDescending<JobOffer> { it.matchScore }
+                    .thenByDescending { HtmlSanitizer.isValidRecruiterEmail(it.recruiterEmail) }
             )
 
         var enrichedCount = 0
@@ -1087,7 +1091,7 @@ object ApplicationAutomationManager {
         return EmailConfig(
             authType = authType,
             senderEmail = settings.senderEmail.ifBlank { profile.email },
-            senderName = profile.fullName,
+            senderName = profile.effectiveFullName(),
             smtpHost = settings.smtpHost,
             smtpPort = settings.smtpPort,
             smtpUser = settings.senderEmail.ifBlank { profile.email },

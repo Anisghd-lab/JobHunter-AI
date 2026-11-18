@@ -30,49 +30,210 @@ data class PortalCheckResult(
 object PortalSessionRegistry {
 
     val portals: List<JobPortalAccount> = listOf(
+        // --- FRANCE (Ferroviaire & Travaux Publics) ---
+        JobPortalAccount(
+            id = "sncf",
+            name = "SNCF Emploi & Réseau",
+            badge = "🇫🇷 France Rail",
+            description = "Voies ferrées, caténaires, signalisation, métré & régénération réseau LGV",
+            domainUrl = "https://www.emploi.sncf.com",
+            loginUrl = "https://www.emploi.sncf.com",
+            signupUrl = "https://www.emploi.sncf.com",
+            checkUrl = "https://www.emploi.sncf.com",
+            authCookieHints = listOf("sncf", "session", "auth", "token", "remember")
+        ),
+        JobPortalAccount(
+            id = "colasrail",
+            name = "Colas Rail (Bouygues)",
+            badge = "🇫🇷 France Rail / TP",
+            description = "Infrastructures ferroviaires, voies, électrification & études de prix",
+            domainUrl = "https://www.colasrail.com",
+            loginUrl = "https://www.colasrail.com/nos-offres/",
+            signupUrl = "https://www.colasrail.com/nos-offres/",
+            checkUrl = "https://www.colasrail.com/nos-offres/",
+            authCookieHints = listOf("colas", "session", "auth", "phpsessid")
+        ),
+        JobPortalAccount(
+            id = "systra",
+            name = "SYSTRA Carrières",
+            badge = "🇫🇷 France Ingénierie",
+            description = "Leader ingénierie ferroviaire, LGV, métros, métré & chiffrage budgétaire",
+            domainUrl = "https://jobs.systra.com",
+            loginUrl = "https://jobs.systra.com",
+            signupUrl = "https://jobs.systra.com",
+            checkUrl = "https://jobs.systra.com",
+            authCookieHints = listOf("systra", "session", "token", "sap-usercontext")
+        ),
+        JobPortalAccount(
+            id = "etf_vinci",
+            name = "ETF (VINCI Construction)",
+            badge = "🇫🇷 France Rail",
+            description = "Travaux ferroviaires, ballast, caténaires, métré d'exécution & chiffrage",
+            domainUrl = "https://www.etf.fr",
+            loginUrl = "https://www.etf.fr/nous-rejoindre/",
+            signupUrl = "https://www.etf.fr/nous-rejoindre/",
+            checkUrl = "https://www.etf.fr/nous-rejoindre/",
+            authCookieHints = listOf("etf", "vinci", "session", "auth")
+        ),
+        JobPortalAccount(
+            id = "eiffage_rail",
+            name = "Eiffage Rail & TP",
+            badge = "🇫🇷 France TP / Rail",
+            description = "Grands projets ferroviaires, génie civil, études de prix et métré",
+            domainUrl = "https://jobs.eiffage.com",
+            loginUrl = "https://jobs.eiffage.com",
+            signupUrl = "https://jobs.eiffage.com",
+            checkUrl = "https://jobs.eiffage.com",
+            authCookieHints = listOf("eiffage", "session", "auth", "token")
+        ),
+        JobPortalAccount(
+            id = "tso_nge",
+            name = "TSO (NGE Ferroviaire)",
+            badge = "🇫🇷 France Rail",
+            description = "Construction et renouvellement de voies ferrées, métré travaux et devis",
+            domainUrl = "https://www.tso.fr",
+            loginUrl = "https://www.tso.fr",
+            signupUrl = "https://www.tso.fr",
+            checkUrl = "https://www.tso.fr",
+            authCookieHints = listOf("tso", "nge", "session", "auth")
+        ),
+
+        // --- CANADA (Chemin de Fer & Grands Travaux) ---
+        JobPortalAccount(
+            id = "cn_rail",
+            name = "CN (Canadian National)",
+            badge = "🇨🇦 Canada Rail",
+            description = "Réseau ferroviaire transcanadien, entretien des voies & estimation de coûts",
+            domainUrl = "https://www.cn.ca",
+            loginUrl = "https://www.cn.ca/en/careers/",
+            signupUrl = "https://www.cn.ca/en/careers/",
+            checkUrl = "https://www.cn.ca/en/careers/",
+            authCookieHints = listOf("cn", "career", "session", "auth", "token")
+        ),
+        JobPortalAccount(
+            id = "cpkc",
+            name = "CPKC (Canadian Pacific)",
+            badge = "🇨🇦 Canada Rail",
+            description = "Infrastructures ferroviaires, métré, estimation de contrats & ponts",
+            domainUrl = "https://www.cpkcr.com",
+            loginUrl = "https://www.cpkcr.com/en/careers",
+            signupUrl = "https://www.cpkcr.com/en/careers",
+            checkUrl = "https://www.cpkcr.com/en/careers",
+            authCookieHints = listOf("cpkc", "session", "auth", "token")
+        ),
+        JobPortalAccount(
+            id = "via_rail",
+            name = "VIA Rail Canada",
+            badge = "🇨🇦 Canada Rail",
+            description = "Infrastructures voyageurs, ouvrages d'art ferroviaires & suivi des budgets",
+            domainUrl = "https://corpo.viarail.ca",
+            loginUrl = "https://corpo.viarail.ca/fr/carrieres",
+            signupUrl = "https://corpo.viarail.ca/fr/carrieres",
+            checkUrl = "https://corpo.viarail.ca/fr/carrieres",
+            authCookieHints = listOf("viarail", "session", "auth", "token")
+        ),
+        JobPortalAccount(
+            id = "atkinsrealis",
+            name = "AtkinsRéalis (SNC-Lavalin)",
+            badge = "🇨🇦 Canada Ingénierie",
+            description = "Grands projets ferroviaires, voies, génie civil & estimation principale",
+            domainUrl = "https://careers.atkinsrealis.com",
+            loginUrl = "https://careers.atkinsrealis.com",
+            signupUrl = "https://careers.atkinsrealis.com",
+            checkUrl = "https://careers.atkinsrealis.com",
+            authCookieHints = listOf("atkinsrealis", "session", "auth", "token")
+        ),
+        JobPortalAccount(
+            id = "alstom_ca",
+            name = "Alstom Canada",
+            badge = "🇨🇦 Canada Transport",
+            description = "Systèmes ferroviaires, signalisation, pose de voies et métré",
+            domainUrl = "https://jobsearch.alstom.com",
+            loginUrl = "https://jobsearch.alstom.com",
+            signupUrl = "https://jobsearch.alstom.com",
+            checkUrl = "https://jobsearch.alstom.com",
+            authCookieHints = listOf("alstom", "session", "auth", "token")
+        ),
+        JobPortalAccount(
+            id = "guichet_emplois",
+            name = "Guichet-Emplois Canada",
+            badge = "🇨🇦 Canada Fédéral",
+            description = "Portail officiel gouvernemental canadien — Métreur, Estimateur, Travaux Publics",
+            domainUrl = "https://www.guichetemplois.gc.ca",
+            loginUrl = "https://www.guichetemplois.gc.ca/connexion",
+            signupUrl = "https://www.guichetemplois.gc.ca/inscrire",
+            checkUrl = "https://www.guichetemplois.gc.ca/accueil",
+            authCookieHints = listOf("guichet", "jobbank", "session", "auth", "token")
+        ),
+
+        // --- ALGÉRIE (Infrastructures Ferroviaires & Travaux Publics) ---
+        JobPortalAccount(
+            id = "setirail",
+            name = "SETIRAIL",
+            badge = "🇩🇿 Algérie Rail",
+            description = "Société Technique de l'Ingénierie de Rail (Ingénierie, voies ferrées & études)",
+            domainUrl = "https://www.setirail.dz",
+            loginUrl = "https://www.setirail.dz",
+            signupUrl = "https://www.setirail.dz",
+            checkUrl = "https://www.setirail.dz",
+            authCookieHints = listOf("setirail", "session", "auth")
+        ),
+        JobPortalAccount(
+            id = "anesrif",
+            name = "ANESRIF Algérie",
+            badge = "🇩🇿 Algérie Rail",
+            description = "Agence Nationale d'Études et de Suivi de la Réalisation des Investissements Ferroviaires",
+            domainUrl = "https://www.anesrif.dz",
+            loginUrl = "https://www.anesrif.dz",
+            signupUrl = "https://www.anesrif.dz",
+            checkUrl = "https://www.anesrif.dz",
+            authCookieHints = listOf("anesrif", "session", "auth")
+        ),
+        JobPortalAccount(
+            id = "cosider_tp",
+            name = "Cosider Travaux Publics",
+            badge = "🇩🇿 Algérie TP",
+            description = "Leader national des grands travaux publics, terrassements et ouvrages d'art",
+            domainUrl = "https://www.cosider-groupe.dz",
+            loginUrl = "https://www.cosider-groupe.dz",
+            signupUrl = "https://www.cosider-groupe.dz",
+            checkUrl = "https://www.cosider-groupe.dz",
+            authCookieHints = listOf("cosider", "session", "auth")
+        ),
         JobPortalAccount(
             id = "emploitic",
-            name = "Emploitic Algérie",
+            name = "Emploitic Algérie (BTP / TP)",
             badge = "🇩🇿 Algérie",
-            description = "Portail n°1 Algérie (session Keycloak persistante après connexion/CAPTCHA)",
+            description = "Portail n°1 Algérie — Catégorie Génie Civil, Travaux Publics & Chantiers",
             domainUrl = "https://emploitic.com",
             loginUrl = "https://emploitic.com/offres-d-emploi",
             signupUrl = "https://emploitic.com/auth/realms/candidate/account/",
             checkUrl = "https://emploitic.com/offres-d-emploi",
             authCookieHints = listOf("keycloak", "next-auth", "session", "token", "auth", "connect.sid")
         ),
-        JobPortalAccount(
-            id = "tanqeeb",
-            name = "Tanqeeb Golfe (GCC)",
-            badge = "🏜️ Golfe",
-            description = "UAE, Arabie Saoudite, Qatar, Koweït, Oman & Bahreïn",
-            domainUrl = "https://uae.tanqeeb.com",
-            loginUrl = "https://uae.tanqeeb.com/users/login",
-            signupUrl = "https://uae.tanqeeb.com/cv/Register",
-            checkUrl = "https://uae.tanqeeb.com/users/login",
-            authCookieHints = listOf("phpsessid", "laravel", "tanqeeb", "session", "auth", "remember")
-        ),
-        JobPortalAccount(
-            id = "qatarliving",
-            name = "QatarLiving Jobs",
-            badge = "🇶🇦 Qatar",
-            description = "Annonces directes Qatar (connexion utilisateur & candidatures)",
-            domainUrl = "https://www.qatarliving.com",
-            loginUrl = "https://www.qatarliving.com/en/jobs",
-            signupUrl = "https://www.qatarliving.com/en/jobs",
-            checkUrl = "https://www.qatarliving.com/en/jobs",
-            authCookieHints = listOf("qat", "qat_refresh", "ssess", "sess", "ql_", "token", "auth", "session")
-        ),
+
+        // --- RÉSEAU PRO & GOLFE ---
         JobPortalAccount(
             id = "linkedin",
             name = "LinkedIn Jobs",
             badge = "💼 Réseau Pro",
-            description = "Postuler en 1 clic sur LinkedIn avec session persistante",
+            description = "Candidatures ferroviaires & TP ciblées France, Canada, Algérie et Golfe",
             domainUrl = "https://www.linkedin.com",
             loginUrl = "https://www.linkedin.com/login",
             signupUrl = "https://www.linkedin.com/signup",
             checkUrl = "https://www.linkedin.com/feed/",
             authCookieHints = listOf("li_at", "liap", "jsessionid", "bcookie", "bscookie")
+        ),
+        JobPortalAccount(
+            id = "tanqeeb",
+            name = "Tanqeeb Golfe (GCC)",
+            badge = "🏜️ Golfe",
+            description = "Postes Quantity Surveyor & Civil Engineer aux Émirats, Qatar et Arabie Saoudite",
+            domainUrl = "https://uae.tanqeeb.com",
+            loginUrl = "https://uae.tanqeeb.com/users/login",
+            signupUrl = "https://uae.tanqeeb.com/cv/Register",
+            checkUrl = "https://uae.tanqeeb.com/users/login",
+            authCookieHints = listOf("phpsessid", "laravel", "tanqeeb", "session", "auth", "remember")
         )
     )
 

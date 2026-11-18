@@ -204,7 +204,7 @@ object CvParser {
     /**
      * Deterministic, 100% REAL extraction from actual text lines with ZERO fabricated data.
      */
-    fun buildProfileFromText(rawText: String, fileName: String, format: String): UserProfile {
+    fun buildProfileFromText(rawText: String, fileName: String = "CV.pdf", format: String = "PDF"): UserProfile {
         if (rawText.isBlank()) {
             return UserProfile(
                 fullName = "",
@@ -236,13 +236,40 @@ object CvParser {
         // 3. Extract Real Full Name & Title
         var detectedName = ""
         var detectedTitle = ""
-        val candidateLines = lines.filter { !it.contains("@") && !it.matches(Regex(""".*\d{7,}.*""")) }
+
+        fun isAddressOrContact(s: String): Boolean {
+            val lower = s.lowercase().trim()
+            return lower.contains("cité") || lower.contains("rue") || lower.contains("algeria") ||
+                    lower.contains("algérie") || lower.contains("address") || lower.contains("adresse") ||
+                    lower.contains("door no") || lower.contains("door n°") || lower.contains("wilaya") ||
+                    lower.contains("phone") || lower.contains("téléphone") || lower.contains("tel :") ||
+                    Regex("""\b\d{5}\b""").containsMatchIn(s) || Regex("""\(\d{4,5}\)""").containsMatchIn(s)
+        }
+
+        fun isHeaderNoise(s: String): Boolean {
+            val lower = s.lowercase().trim()
+            return lower in setOf("curriculum vitae", "curriculum vitæ", "cv", "resume", "résumé", "profil", "profile", "contact", "coordonnées") ||
+                    lower.startsWith("curriculum") ||
+                    lower.startsWith("page ") ||
+                    lower == "1" || lower == "2" || lower == "3" || lower == "4"
+        }
+
+        val candidateLines = lines.filter { line ->
+            !line.contains("@") &&
+            !line.matches(Regex(""".*\d{7,}.*""")) &&
+            !isHeaderNoise(line) &&
+            line.length in 3..90
+        }
 
         if (candidateLines.isNotEmpty()) {
-            detectedName = candidateLines[0]
+            detectedName = candidateLines.firstOrNull { !isAddressOrContact(it) } ?: candidateLines[0]
         }
-        if (candidateLines.size > 1 && candidateLines[1].length < 120 && !candidateLines[1].contains("@")) {
-            detectedTitle = candidateLines[1]
+        val remainingAfterName = candidateLines.filter { it != detectedName && !isAddressOrContact(it) }
+        if (remainingAfterName.isNotEmpty()) {
+            val firstCand = remainingAfterName[0]
+            if (firstCand.length < 80 && !firstCand.startsWith("-") && !firstCand.startsWith("•")) {
+                detectedTitle = firstCand
+            }
         }
 
         // 4. Extract Real Summary
@@ -380,22 +407,87 @@ object CvParser {
         }
         flushExperience()
 
-        // Fallback for skills if section wasn't delimited
-        if (extractedSkills.isEmpty()) {
-            val knownSkillKeywords = listOf(
-                "Kotlin", "Java", "Swift", "Python", "JavaScript", "TypeScript", "C++", "C#", "Rust", "Go", "PHP", "SQL",
-                "Android", "Jetpack Compose", "React", "React Native", "Flutter", "Vue", "Angular", "Node.js", "Spring Boot",
-                "Docker", "Kubernetes", "AWS", "Azure", "GCP", "Linux", "Git", "CI/CD", "REST", "GraphQL", "Room", "Firebase",
-                "PostgreSQL", "MySQL", "MongoDB", "Redis", "Figma", "Architecture MVVM", "Clean Architecture", "Scrum", "Agile",
-                "Human Resources", "Recruitment", "Onboarding", "Payroll", "Employee Relations", "Office Administration",
-                "Microsoft Office", "Excel", "ERP Systems", "AutoCAD", "Fusion 360", "Photoshop", "Dart"
+        // Derive high-precision title from candidate roles if not clearly in header
+        if (detectedTitle.isBlank() || isAddressOrContact(detectedTitle) || detectedTitle.equals(detectedName, ignoreCase = true) || detectedTitle.startsWith("-")) {
+            val jobTitleKeywords = listOf(
+                "métreur", "metreur", "quantity surveyor", "ingénieur", "engineer",
+                "technicien", "technician", "conducteur de travaux", "chef de projet",
+                "développeur", "developer", "architecte", "directeur", "responsable"
             )
-            for (kw in knownSkillKeywords) {
-                if (rawText.contains(kw, ignoreCase = true)) {
+            val foundRoles = mutableListOf<String>()
+            for (l in lines) {
+                val clean = l.removePrefix("-").removePrefix(".").removePrefix("•").removePrefix("●").removePrefix("\uf0fc").trim()
+                val cleanLower = clean.lowercase()
+                if (jobTitleKeywords.any { cleanLower.contains(it) }) {
+                    if (Regex("""^\d{2}/\d{4}""").containsMatchIn(clean) || clean.contains("–") || clean.contains("Present", ignoreCase = true)) {
+                        continue
+                    }
+                    if (clean.length in 5..75 && !clean.contains(":") && clean !in foundRoles) {
+                        foundRoles.add(clean)
+                    }
+                }
+            }
+            detectedTitle = when {
+                foundRoles.size >= 2 -> "${foundRoles[0]} / ${foundRoles[1]}"
+                foundRoles.isNotEmpty() -> foundRoles[0]
+                else -> experiences.firstOrNull()?.title?.takeIf { it.isNotBlank() && it != "Poste Professionnel" } ?: ""
+            }.take(85)
+        }
+
+        // Comprehensive domain & software skills extraction across the entire document
+        val domainCatalog = listOf(
+            // BTP / Génie Civil / Travaux Publics
+            "AutoCAD", "Covadis", "Archicad", "Autodesk", "Revit", "Génie Civil", "Travaux Publics",
+            "Métré", "BTP", "Voie Ferrée", "Suivi de chantier", "Étude des prix", "Attachements",
+            "Contrôle Qualité", "Marchés Publics", "Devis quantitatif", "Sous-détail des prix",
+            "Topographie", "Ouvrages d'art", "VRD", "Béton armé", "Terrassement", "Canalisation",
+            "Quantity Surveying", "Civil Engineering", "Public Works", "Construction",
+            // Informatique / Software / IT
+            "Kotlin", "Java", "Swift", "Python", "JavaScript", "TypeScript", "C++", "C#", "Rust", "PHP", "SQL",
+            "Android", "Jetpack Compose", "React", "React Native", "Flutter", "Vue", "Angular", "Node.js", "Spring Boot",
+            "Docker", "Kubernetes", "AWS", "Azure", "GCP", "Linux", "Git", "CI/CD", "REST", "GraphQL", "Room", "Firebase",
+            "PostgreSQL", "MySQL", "MongoDB", "Redis", "Figma", "Architecture MVVM", "Clean Architecture", "Scrum", "Agile",
+            // Bureautique / Management / Gestion
+            "Microsoft Office", "Excel", "Word", "PowerPoint", "ERP Systems", "SAP", "MS Project", "Primavera",
+            "Management", "Gestion de projet", "Comptabilité", "Logistique", "Coordination",
+            "Human Resources", "Recruitment", "Onboarding", "Payroll"
+        )
+
+        for (kw in domainCatalog) {
+            val pattern = if (kw.length <= 4) "\\b${Regex.escape(kw)}\\b" else Regex.escape(kw)
+            if (Regex(pattern, RegexOption.IGNORE_CASE).containsMatchIn(rawText)) {
+                if (kw !in extractedSkills) {
                     extractedSkills.add(kw)
                 }
             }
         }
+
+        // Check for specific "Logiciels" or "Software" lines
+        Regex("""(?i)(?:software|logiciels?|outils?)\s*[:\-]?\s*([^.\n]+)""").findAll(rawText).forEach { match ->
+            match.groupValues[1].split(",", "-", "/", "•", "|", ";").forEach { token ->
+                val clean = token.replace(")", "").replace("(", "").trim()
+                if (clean.length in 3..35 && !clean.contains(":") && !clean.contains("http")) {
+                    if (clean !in extractedSkills) extractedSkills.add(clean)
+                }
+            }
+        }
+
+        // Filter out sentence fragments / soft skill slogans from technical skills
+        val cleanSkills = extractedSkills
+            .map { it.replace(")", "").replace("(", "").trim().removePrefix("-").trim() }
+            .filter { sk ->
+                val lower = sk.lowercase()
+                sk.length in 2..45 &&
+                !lower.contains("motivated") &&
+                !lower.contains("organized") &&
+                !lower.contains("active at work") &&
+                !lower.contains("quick learner") &&
+                !lower.contains("team player") &&
+                !lower.contains("supervision") &&
+                !lower.contains("listening skills") &&
+                !lower.contains("communication")
+            }
+            .distinct()
 
         // Fallback for languages if section wasn't delimited
         if (extractedLanguages.isEmpty()) {
@@ -413,7 +505,7 @@ object CvParser {
             phone = foundPhone,
             title = detectedTitle,
             summary = extractedSummary,
-            skills = extractedSkills.distinct().filter { it.length in 2..50 },
+            skills = cleanSkills,
             languages = extractedLanguages.distinct(),
             experiences = experiences.take(15),
             educations = educations.take(10),

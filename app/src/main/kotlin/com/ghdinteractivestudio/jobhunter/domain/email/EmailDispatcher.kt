@@ -479,10 +479,21 @@ class EmailDispatcher(private val config: EmailConfig) {
                 val msg = e.message.orEmpty()
                 if (msg.contains("535") || msg.contains("534") || msg.contains("AUTH005") || msg.contains("Authentication")) {
                     val detail = msg.substringAfter("): ").trim().ifBlank { msg }
-                    val friendly = if (msg.contains("AUTH005", ignoreCase = true)) {
-                        "Yahoo bloque temporairement SMTP ($detail — trop de tentatives). Attendez 15 min ou utilisez l'envoi via l'Appli Yahoo Mail ci-dessous !"
-                    } else {
-                        "Identifiants refusés ($detail). Yahoo/Gmail exige un Mot de passe d'application à 16 lettres (pas le mot de passe normal), ou utilisez l'Appli Yahoo Mail !"
+                    val isGmail = config.smtpHost.contains("gmail", ignoreCase = true) || config.senderEmail.contains("@gmail.", ignoreCase = true)
+                    val isYahoo = config.smtpHost.contains("yahoo", ignoreCase = true) || config.senderEmail.contains("@yahoo.", ignoreCase = true)
+                    val isOutlook = config.smtpHost.contains("outlook", ignoreCase = true) || config.smtpHost.contains("office365", ignoreCase = true) || config.senderEmail.contains("@outlook.", ignoreCase = true) || config.senderEmail.contains("@hotmail.", ignoreCase = true)
+
+                    val friendly = when {
+                        msg.contains("AUTH005", ignoreCase = true) ->
+                            "Yahoo bloque temporairement SMTP ($detail — trop de tentatives). Attendez 15 min ou utilisez l'envoi direct via l'Appli Yahoo Mail !"
+                        isGmail ->
+                            "Authentification Gmail refusée (535). Google exige un « Mot de passe d'application » à 16 lettres (généré sur myaccount.google.com/apppasswords avec 2FA activée), ou utilisez l'envoi direct en 1 clic via l'application Gmail installée !"
+                        isYahoo ->
+                            "Authentification Yahoo refusée (535). Yahoo exige un « Mot de passe d'application » à 16 lettres (généré sur login.yahoo.com/myaccount/security), ou utilisez l'application Yahoo Mail !"
+                        isOutlook ->
+                            "Authentification Outlook refusée (535). Vérifiez vos identifiants ou utilisez un mot de passe d'application Microsoft."
+                        else ->
+                            "Identifiants SMTP refusés ($detail). Vérifiez votre adresse email et votre mot de passe d'application à 16 caractères."
                     }
                     throw IllegalStateException(friendly, e)
                 }

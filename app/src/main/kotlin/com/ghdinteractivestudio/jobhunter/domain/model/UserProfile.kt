@@ -84,23 +84,72 @@ data class UserProfile(
         frenchCv?.rawText?.let { append(it) }
     }
 
+    fun isInvalidName(name: String): Boolean {
+        val trimmed = name.trim().lowercase()
+        return trimmed.isBlank() ||
+                trimmed == "curriculum vitae" ||
+                trimmed == "curriculum vitæ" ||
+                trimmed == "cv" ||
+                trimmed == "resume" ||
+                trimmed == "résumé" ||
+                trimmed.startsWith("curriculum")
+    }
+
+    fun effectiveFullName(): String {
+        val trimmedName = fullName.trim()
+        if (!isInvalidName(trimmedName)) return trimmedName
+        val trimmedTitle = title.trim()
+        if (!isInvalidName(trimmedTitle) && trimmedTitle.split(Regex("\\s+")).size in 2..4 &&
+            trimmedTitle.none { it.isDigit() } &&
+            !trimmedTitle.contains("ingénieur", ignoreCase = true) &&
+            !trimmedTitle.contains("engineer", ignoreCase = true) &&
+            !trimmedTitle.contains("métreur", ignoreCase = true)
+        ) {
+            return trimmedTitle
+        }
+        return "GHEDIRI MOHAMED REDHA"
+    }
+
+    fun effectiveTitle(): String {
+        val effName = effectiveFullName().lowercase()
+        val trimmedTitle = title.trim()
+        if (trimmedTitle.isBlank() || trimmedTitle.lowercase() == effName || isInvalidName(trimmedTitle)) {
+            return "Ingénieur Travaux Publics / Métreur-Vérificateur"
+        }
+        return trimmedTitle
+    }
+
     /**
      * Ensures single-CV profiles imported prior to dual EN/FR slots automatically map
-     * cleanly into englishCv or frenchCv without data loss.
+     * cleanly into englishCv or frenchCv without data loss and heals legacy corrupt headers.
      */
     fun migrateLegacySlotIfNeeded(): UserProfile {
-        if (englishCv != null || frenchCv != null || rawCvContent.isBlank()) return this
-        val sample = "${sourceCvFileName} ${rawCvContent.take(600)}".lowercase()
+        var prof = this
+        val trimmedName = prof.fullName.trim()
+        val isCorruptName = prof.isInvalidName(trimmedName)
+        val trimmedTitle = prof.title.trim()
+        val isTitleCandidateName = trimmedTitle.equals("GHEDIRI MOHAMED REDHA", ignoreCase = true) ||
+                (trimmedTitle.isNotBlank() && trimmedTitle.equals(trimmedName, ignoreCase = true))
+
+        if (isCorruptName || isTitleCandidateName) {
+            prof = prof.copy(
+                fullName = prof.effectiveFullName(),
+                title = prof.effectiveTitle()
+            )
+        }
+
+        if (prof.englishCv != null || prof.frenchCv != null || prof.rawCvContent.isBlank()) return prof
+        val sample = "${prof.sourceCvFileName} ${prof.rawCvContent.take(600)}".lowercase()
         val frHints = listOf("expérience", "compétences", "formation", "langues", "français", "francais", "algérie", "poste")
-        val looksFrench = frHints.count { sample.contains(it) } >= 2 && !sourceCvFileName.contains("english", ignoreCase = true)
+        val looksFrench = frHints.count { sample.contains(it) } >= 2 && !prof.sourceCvFileName.contains("english", ignoreCase = true)
         val slot = CvDocumentSlot(
-            fileName = sourceCvFileName.ifBlank { if (looksFrench) "CV_Francais.pdf" else "CV_English.pdf" },
-            format = sourceCvFormat.ifBlank { "PDF" },
-            filePath = sourceCvPath,
-            rawText = rawCvContent,
-            isModified = isModifiedCv,
-            parsedAt = parsedAt
+            fileName = prof.sourceCvFileName.ifBlank { if (looksFrench) "CV_Francais.pdf" else "CV_English.pdf" },
+            format = prof.sourceCvFormat.ifBlank { "PDF" },
+            filePath = prof.sourceCvPath,
+            rawText = prof.rawCvContent,
+            isModified = prof.isModifiedCv,
+            parsedAt = prof.parsedAt
         )
-        return if (looksFrench) copy(frenchCv = slot) else copy(englishCv = slot)
+        return if (looksFrench) prof.copy(frenchCv = slot) else prof.copy(englishCv = slot)
     }
 }
